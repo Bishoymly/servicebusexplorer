@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
-import { Plus, RefreshCw, ArrowUpDown } from "lucide-react"
+import { useState, useMemo } from "react"
+import { Plus, RefreshCw, ArrowUpDown, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { QueueTable } from "./QueueTable"
 import { QueueDetails } from "./QueueDetails"
@@ -25,6 +26,18 @@ export function QueueList() {
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [refreshingQueues, setRefreshingQueues] = useState<Set<string>>(new Set())
   const [purgingQueues, setPurgingQueues] = useState<Set<string>>(new Set())
+  const [searchQuery, setSearchQuery] = useState("")
+
+  // Filter queues by search query
+  const filteredQueues = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return queues
+    }
+    const query = searchQuery.toLowerCase().trim()
+    return queues.filter((queue) => 
+      queue.name.toLowerCase().includes(query)
+    )
+  }, [queues, searchQuery])
 
   // Clear selected queue when connection changes
   useEffect(() => {
@@ -106,7 +119,16 @@ export function QueueList() {
             <div>
               <h2 className="text-2xl font-semibold">Queues</h2>
               <p className="text-sm text-muted-foreground">
-                {queues.length > 0 && `${queues.length} queue${queues.length !== 1 ? "s" : ""}`}
+                {filteredQueues.length > 0 && (
+                  <>
+                    {filteredQueues.length} of {queues.length} queue{queues.length !== 1 ? "s" : ""}
+                    {searchQuery && ` matching "${searchQuery}"`}
+                  </>
+                )}
+                {filteredQueues.length === 0 && queues.length > 0 && searchQuery && (
+                  <>No queues found matching "{searchQuery}"</>
+                )}
+                {queues.length === 0 && !loading && "No queues found"}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -132,6 +154,29 @@ export function QueueList() {
             </div>
           </div>
 
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Search queues by name..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            {searchQuery && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSearchQuery("")}
+                className="h-9"
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+
           {error && (
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
@@ -145,9 +190,13 @@ export function QueueList() {
               <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
               <span className="ml-2 text-sm text-muted-foreground">Loading queues...</span>
             </div>
-          ) : queues.length === 0 ? (
+          ) : filteredQueues.length === 0 && !loading ? (
             <div className="text-center py-12 text-muted-foreground">
-              <p>No queues found. Create your first queue to get started.</p>
+              {searchQuery ? (
+                <p>No queues found matching "{searchQuery}". Try a different search term.</p>
+              ) : (
+                <p>No queues found. Create your first queue to get started.</p>
+              )}
             </div>
           ) : (
             <>
@@ -158,7 +207,7 @@ export function QueueList() {
                 </div>
               )}
               <QueueTable
-                queues={queues}
+                queues={filteredQueues}
                 onQueueClick={handleQueueClick}
                 onQueueClickDeadLetter={handleQueueClickDeadLetter}
                 onEdit={(queue) => {

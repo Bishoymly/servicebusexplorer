@@ -79,3 +79,55 @@ jobs:
           releaseDraft: true
           prerelease: false
 
+      - name: Upload Windows artifacts
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload macOS artifacts (x64)
+        if: matrix.platform == 'macos-latest' && matrix.args == '--target x86_64-apple-darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload macOS artifacts (ARM64)
+        if: matrix.platform == 'macos-latest' && matrix.args == '--target aarch64-apple-darwin'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload Linux artifacts
+        if: matrix.platform == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: List build artifacts (debug)
+        if: always()
+        run: |
+          echo "Checking for build artifacts..."
+          if [ "${{ matrix.platform }}" == "windows-latest" ]; then
+            ls -la src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/ || echo "No MSI files found"
+          elif [ "${{ matrix.platform }}" == "macos-latest" ]; then
+            if [ "${{ matrix.args }}" == "--target x86_64-apple-darwin" ]; then
+              ls -la src-tauri/target/x86_64-apple-darwin/release/bundle/macos/ || echo "No macOS x64 app found"
+            else
+              ls -la src-tauri/target/aarch64-apple-darwin/release/bundle/macos/ || echo "No macOS ARM64 app found"
+            fi
+          else
+            ls -la src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/ || echo "No DEB files found"
+          fi
+
