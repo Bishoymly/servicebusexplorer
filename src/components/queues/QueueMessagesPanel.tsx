@@ -17,18 +17,24 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface QueueMessagesPanelProps {
   queueName: string
+  initialShowDeadLetter?: boolean
   onClose?: () => void
 }
 
-export function QueueMessagesPanel({ queueName, onClose }: QueueMessagesPanelProps) {
+export function QueueMessagesPanel({ queueName, initialShowDeadLetter = false, onClose }: QueueMessagesPanelProps) {
   const { peekMessages, peekDeadLetterMessages, loading, error } = useMessages()
   const { currentConnection, currentConnectionId, loading: connectionsLoading } = useConnections()
   const { purgeQueue, refreshQueue } = useQueues()
   const [messages, setMessages] = useState<ServiceBusMessage[]>([])
   const [maxCount, setMaxCount] = useState(100)
-  const [showDeadLetter, setShowDeadLetter] = useState(false)
+  const [showDeadLetter, setShowDeadLetter] = useState(initialShowDeadLetter)
   const [purging, setPurging] = useState(false)
   const [showSendDialog, setShowSendDialog] = useState(false)
+
+  // Update showDeadLetter when initialShowDeadLetter prop changes
+  useEffect(() => {
+    setShowDeadLetter(initialShowDeadLetter)
+  }, [initialShowDeadLetter])
 
   const loadMessages = useCallback(async () => {
     // Don't load if connection is not ready

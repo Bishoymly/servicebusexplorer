@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils"
 interface QueueTableProps {
   queues: QueueProperties[]
   onQueueClick: (queue: QueueProperties) => void
+  onQueueClickDeadLetter?: (queue: QueueProperties) => void
   onEdit: (queue: QueueProperties) => void
   onDelete: (queueName: string) => void
   onRefresh?: (queueName: string) => void
@@ -32,7 +33,7 @@ interface QueueTableProps {
   purgingQueues?: Set<string>
 }
 
-export function QueueTable({ queues, onQueueClick, onEdit, onDelete, onRefresh, onPurge, refreshingQueues, purgingQueues }: QueueTableProps) {
+export function QueueTable({ queues, onQueueClick, onQueueClickDeadLetter, onEdit, onDelete, onRefresh, onPurge, refreshingQueues, purgingQueues }: QueueTableProps) {
   const formatNumber = (num: number | undefined) => {
     if (num === undefined || num === null) return "0"
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
@@ -94,7 +95,11 @@ export function QueueTable({ queues, onQueueClick, onEdit, onDelete, onRefresh, 
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
-                      onQueueClick(queue)
+                      if (onQueueClickDeadLetter) {
+                        onQueueClickDeadLetter(queue)
+                      } else {
+                        onQueueClick(queue)
+                      }
                     }}
                     className="text-destructive hover:underline"
                   >

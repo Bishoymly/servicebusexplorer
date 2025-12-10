@@ -19,6 +19,7 @@ export function QueueList() {
   const { currentConnectionId } = useConnections()
   const [selectedQueue, setSelectedQueue] = useState<QueueProperties | null>(null)
   const [selectedQueueForMessages, setSelectedQueueForMessages] = useState<string | null>(null)
+  const [showDeadLetterForQueue, setShowDeadLetterForQueue] = useState<string | null>(null)
   const [showDetails, setShowDetails] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showCreateForm, setShowCreateForm] = useState(false)
@@ -29,6 +30,7 @@ export function QueueList() {
   useEffect(() => {
     setSelectedQueue(null)
     setSelectedQueueForMessages(null)
+    setShowDeadLetterForQueue(null)
     setShowDetails(false)
     setShowSettings(false)
   }, [currentConnectionId])
@@ -36,8 +38,15 @@ export function QueueList() {
   const handleQueueClick = (queue: QueueProperties) => {
     setSelectedQueue(queue)
     setSelectedQueueForMessages(queue.name)
+    setShowDeadLetterForQueue(null) // Clear dead letter flag for regular click
     // Don't show details dialog in split view - messages panel replaces it
     // setShowDetails(true)
+  }
+
+  const handleQueueClickDeadLetter = (queue: QueueProperties) => {
+    setSelectedQueue(queue)
+    setSelectedQueueForMessages(queue.name)
+    setShowDeadLetterForQueue(queue.name) // Set flag to show dead letter
   }
 
   const handleDelete = async (queueName: string) => {
@@ -151,6 +160,7 @@ export function QueueList() {
               <QueueTable
                 queues={queues}
                 onQueueClick={handleQueueClick}
+                onQueueClickDeadLetter={handleQueueClickDeadLetter}
                 onEdit={(queue) => {
                   setSelectedQueue(queue)
                   setShowDetails(false)
@@ -172,7 +182,11 @@ export function QueueList() {
         <div className="w-1/2 min-w-[500px]">
           <QueueMessagesPanel
             queueName={selectedQueueForMessages}
-            onClose={() => setSelectedQueueForMessages(null)}
+            initialShowDeadLetter={showDeadLetterForQueue === selectedQueueForMessages}
+            onClose={() => {
+              setSelectedQueueForMessages(null)
+              setShowDeadLetterForQueue(null)
+            }}
           />
         </div>
       )}
