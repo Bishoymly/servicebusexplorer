@@ -23,14 +23,13 @@ interface MessageListProps {
 }
 
 export function MessageList({ queueName, topicName, subscriptionName }: MessageListProps) {
-  const { peekMessages, peekMessagesFromSubscription, peekDeadLetterMessages, receiveMessages, loading, error } = useMessages()
+  const { peekMessages, peekMessagesFromSubscription, peekDeadLetterMessages, loading, error } = useMessages()
   const { queues } = useQueues()
   const { topics, listSubscriptions } = useTopics()
   const [messages, setMessages] = useState<ServiceBusMessage[]>([])
   const [selectedMessage, setSelectedMessage] = useState<ServiceBusMessage | null>(null)
   const [showViewer, setShowViewer] = useState(false)
   const [showEditor, setShowEditor] = useState(false)
-  const [mode, setMode] = useState<"peek" | "receive">("peek")
   const [maxCount, setMaxCount] = useState(100)
   const [selectedQueue, setSelectedQueue] = useState(queueName || "")
   const [selectedTopic, setSelectedTopic] = useState(topicName || "")
@@ -54,43 +53,38 @@ export function MessageList({ queueName, topicName, subscriptionName }: MessageL
   const loadMessages = async () => {
     setMessages([]) // Clear for progressive loading
     if (selectedQueue) {
-      if (mode === "peek") {
-        const msgs = await peekMessages(selectedQueue, maxCount)
-        // Progressive rendering for large message lists
-        const batchSize = 50
-        const seen = new Set<string>()
+      const msgs = await peekMessages(selectedQueue, maxCount)
+      // Progressive rendering for large message lists
+      const batchSize = 50
+      const seen = new Set<string>()
+      
+      for (let i = 0; i < msgs.length; i += batchSize) {
+        const batch = msgs.slice(i, i + batchSize)
+        // Filter duplicates by messageId or sequenceNumber
+        const uniqueBatch = batch.filter((msg) => {
+          const key = msg.messageId || `seq-${msg.sequenceNumber}` || `idx-${i}`
+          if (seen.has(key)) {
+            return false
+          }
+          seen.add(key)
+          return true
+        })
         
-        for (let i = 0; i < msgs.length; i += batchSize) {
-          const batch = msgs.slice(i, i + batchSize)
-          // Filter duplicates by messageId or sequenceNumber
-          const uniqueBatch = batch.filter((msg) => {
-            const key = msg.messageId || `seq-${msg.sequenceNumber}` || `idx-${i}`
-            if (seen.has(key)) {
-              return false
-            }
-            seen.add(key)
-            return true
+        if (uniqueBatch.length > 0) {
+          setMessages((prev) => {
+            const existingKeys = new Set(
+              prev.map((m) => m.messageId || `seq-${m.sequenceNumber}` || `idx-${prev.indexOf(m)}`)
+            )
+            const newMessages = uniqueBatch.filter(
+              (m) => !existingKeys.has(m.messageId || `seq-${m.sequenceNumber}` || "")
+            )
+            return [...prev, ...newMessages]
           })
-          
-          if (uniqueBatch.length > 0) {
-            setMessages((prev) => {
-              const existingKeys = new Set(
-                prev.map((m) => m.messageId || `seq-${m.sequenceNumber}` || `idx-${prev.indexOf(m)}`)
-              )
-              const newMessages = uniqueBatch.filter(
-                (m) => !existingKeys.has(m.messageId || `seq-${m.sequenceNumber}` || "")
-              )
-              return [...prev, ...newMessages]
-            })
-          }
-          
-          if (i + batchSize < msgs.length) {
-            await new Promise((resolve) => setTimeout(resolve, 10))
-          }
         }
-      } else {
-        const msgs = await receiveMessages(selectedQueue, maxCount)
-        setMessages(msgs)
+        
+        if (i + batchSize < msgs.length) {
+          await new Promise((resolve) => setTimeout(resolve, 10))
+        }
       }
     } else if (selectedTopic && selectedSubscription) {
       const msgs = await peekMessagesFromSubscription(selectedTopic, selectedSubscription, maxCount)
@@ -266,12 +260,6 @@ export function MessageList({ queueName, topicName, subscriptionName }: MessageL
                   max={1000}
                 />
               </div>
-              <Tabs value={mode} onValueChange={(v) => setMode(v as "peek" | "receive")}>
-                <TabsList>
-                  <TabsTrigger value="peek">Peek</TabsTrigger>
-                  <TabsTrigger value="receive">Receive</TabsTrigger>
-                </TabsList>
-              </Tabs>
             </div>
 
             <div className="flex items-center gap-2">

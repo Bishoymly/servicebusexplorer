@@ -387,37 +387,6 @@ export class ServiceBusExplorerClient {
     }
   }
 
-  async receiveMessages(queueName: string, maxCount: number = 10): Promise<ServiceBusMessage[]> {
-    const receiver = this.sbClient.createReceiver(queueName, { receiveMode: "peekLock" })
-    try {
-      const messages = await receiver.receiveMessages(maxCount, { maxWaitTimeInMs: 5000 })
-      const result = messages.map((msg) => ({
-        body: msg.body,
-        messageId: msg.messageId ? String(msg.messageId) : undefined,
-        contentType: msg.contentType,
-        correlationId: msg.correlationId ? String(msg.correlationId) : undefined,
-        sessionId: msg.sessionId,
-        replyTo: msg.replyTo,
-        replyToSessionId: msg.replyToSessionId,
-        subject: msg.subject,
-        timeToLive: msg.timeToLive,
-        to: msg.to,
-        applicationProperties: msg.applicationProperties,
-        deliveryCount: msg.deliveryCount,
-        enqueuedTimeUtc: msg.enqueuedTimeUtc,
-        lockedUntilUtc: msg.lockedUntilUtc,
-        sequenceNumber: msg.sequenceNumber ? Number(msg.sequenceNumber) : undefined,
-      }))
-      // Complete the messages to remove them from the queue
-      for (const msg of messages) {
-        await receiver.completeMessage(msg)
-      }
-      return result
-    } finally {
-      await receiver.close()
-    }
-  }
-
   async sendMessage(queueName: string, message: ServiceBusMessage): Promise<void> {
     const sender = this.sbClient.createSender(queueName)
     try {
@@ -458,6 +427,39 @@ export class ServiceBusExplorerClient {
     } finally {
       await sender.close()
     }
+  }
+
+  async purgeQueue(queueName: string, purgeDeadLetter: boolean = false): Promise<number> {
+    const receiver = this.sbClient.createReceiver(queueName, {
+      receiveMode: "peekLock",
+      subQueueType: purgeDeadLetter ? "deadLetter" : undefined,
+    })
+    
+    let purgedCount = 0
+    const batchSize = 100
+    const maxWaitTimeInMs = 5000
+    
+    try {
+      // Keep receiving and completing messages until no more are available
+      while (true) {
+        const messages = await receiver.receiveMessages(batchSize, { maxWaitTimeInMs })
+        
+        if (messages.length === 0) {
+          // No more messages
+          break
+        }
+        
+        // Complete all messages to remove them from the queue
+        for (const msg of messages) {
+          await receiver.completeMessage(msg)
+          purgedCount++
+        }
+      }
+    } finally {
+      await receiver.close()
+    }
+    
+    return purgedCount
   }
 
   async close(): Promise<void> {

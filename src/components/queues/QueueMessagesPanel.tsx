@@ -1,14 +1,16 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { RefreshCw, Eye } from "lucide-react"
+import { useState, useEffect, useCallback } from "react"
+import { RefreshCw, Trash2, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { InlineMessageViewer } from "./InlineMessageViewer"
+import { MessageEditor } from "@/components/messages/MessageEditor"
 import { useMessages } from "@/hooks/useMessages"
 import { useConnections } from "@/hooks/useConnections"
+import { useQueues } from "@/hooks/useQueues"
 import type { ServiceBusMessage } from "@/types/azure"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -19,50 +21,75 @@ interface QueueMessagesPanelProps {
 }
 
 export function QueueMessagesPanel({ queueName, onClose }: QueueMessagesPanelProps) {
-  const { peekMessages, peekDeadLetterMessages, receiveMessages, loading, error } = useMessages()
+  const { peekMessages, peekDeadLetterMessages, loading, error } = useMessages()
+  const { currentConnection, currentConnectionId, loading: connectionsLoading } = useConnections()
+  const { purgeQueue, refreshQueue } = useQueues()
   const [messages, setMessages] = useState<ServiceBusMessage[]>([])
-  const [mode, setMode] = useState<"peek" | "receive">("peek")
   const [maxCount, setMaxCount] = useState(100)
   const [showDeadLetter, setShowDeadLetter] = useState(false)
+  const [purging, setPurging] = useState(false)
+  const [showSendDialog, setShowSendDialog] = useState(false)
 
-  const loadMessages = async () => {
+  const loadMessages = useCallback(async () => {
+    // Don't load if connection is not ready
+    if (!currentConnection || connectionsLoading || !queueName) {
+      return
+    }
+    
     setMessages([])
     try {
       if (showDeadLetter) {
         const msgs = await peekDeadLetterMessages(queueName, maxCount)
         setMessages(msgs)
-      } else if (mode === "peek") {
-        const msgs = await peekMessages(queueName, maxCount)
-        setMessages(msgs)
       } else {
-        const msgs = await receiveMessages(queueName, maxCount)
+        const msgs = await peekMessages(queueName, maxCount)
         setMessages(msgs)
       }
     } catch (err) {
       console.error("Failed to load messages:", err)
     }
-  }
+  }, [queueName, showDeadLetter, maxCount, currentConnection, connectionsLoading, peekMessages, peekDeadLetterMessages])
 
-  const { currentConnection, currentConnectionId } = useConnections()
-
+  // Load messages when queueName, showDeadLetter, maxCount, or connection changes
   useEffect(() => {
-    if (queueName) {
-      loadMessages()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queueName, mode, showDeadLetter])
-
-  // Reload messages when connection changes
-  useEffect(() => {
-    if (queueName && currentConnection) {
-      loadMessages()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentConnectionId])
+    loadMessages()
+  }, [loadMessages])
 
   const handleResend = async (message: ServiceBusMessage) => {
     // TODO: Implement resend functionality
     console.log("Resend message:", message)
+  }
+
+  const handlePurge = async () => {
+    const confirmMessage = showDeadLetter
+      ? `Are you sure you want to purge all dead letter messages from "${queueName}"? This action cannot be undone.`
+      : `Are you sure you want to purge all messages from "${queueName}"? This action cannot be undone.`
+    
+    if (!confirm(confirmMessage)) {
+      return
+    }
+
+    setPurging(true)
+    try {
+      const purgedCount = await purgeQueue(queueName, showDeadLetter)
+      alert(`Successfully purged ${purgedCount} message${purgedCount !== 1 ? "s" : ""} from ${queueName}`)
+      // Reload messages after purge
+      await loadMessages()
+      // Refresh queue counts
+      await refreshQueue(queueName)
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error"
+      alert(`Failed to purge queue: ${errorMessage}`)
+    } finally {
+      setPurging(false)
+    }
+  }
+
+  const handleSendSuccess = async () => {
+    // Reload messages after sending
+    await loadMessages()
+    // Refresh queue counts
+    await refreshQueue(queueName)
   }
 
   return (
@@ -84,23 +111,40 @@ export function QueueMessagesPanel({ queueName, onClose }: QueueMessagesPanelPro
         </div>
 
         <div className="flex items-center gap-2">
-          <Tabs value={showDeadLetter ? "deadletter" : mode} onValueChange={(v) => {
+          <Tabs value={showDeadLetter ? "deadletter" : "peek"} onValueChange={(v) => {
             if (v === "deadletter") {
               setShowDeadLetter(true)
-              setMode("peek")
             } else {
               setShowDeadLetter(false)
-              setMode(v as "peek" | "receive")
             }
           }}>
             <TabsList>
               <TabsTrigger value="peek">Peek</TabsTrigger>
-              <TabsTrigger value="receive">Receive</TabsTrigger>
               <TabsTrigger value="deadletter">Dead Letter</TabsTrigger>
             </TabsList>
           </Tabs>
 
           <div className="flex items-center gap-2 ml-auto">
+            {!showDeadLetter && (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => setShowSendDialog(true)}
+                disabled={loading}
+              >
+                <Send className="h-4 w-4 mr-2" />
+                Send Message
+              </Button>
+            )}
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handlePurge}
+              disabled={purging || loading}
+            >
+              <Trash2 className={`h-4 w-4 mr-2 ${purging ? "animate-spin" : ""}`} />
+              Purge {showDeadLetter ? "Dead Letter" : "Queue"}
+            </Button>
             <Label htmlFor="maxCount" className="text-xs text-muted-foreground">
               Max:
             </Label>
@@ -150,6 +194,14 @@ export function QueueMessagesPanel({ queueName, onClose }: QueueMessagesPanelPro
           ))
         )}
       </div>
+
+      {/* Send Message Dialog */}
+      <MessageEditor
+        open={showSendDialog}
+        onOpenChange={setShowSendDialog}
+        queueName={queueName}
+        onSuccess={handleSendSuccess}
+      />
     </div>
   )
 }

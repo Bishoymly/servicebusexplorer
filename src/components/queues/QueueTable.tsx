@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { MoreVertical, Eye, Edit, Trash2, RefreshCw } from "lucide-react"
+import { MoreVertical, Eye, Edit, Trash2, RefreshCw, X } from "lucide-react"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,10 +27,12 @@ interface QueueTableProps {
   onEdit: (queue: QueueProperties) => void
   onDelete: (queueName: string) => void
   onRefresh?: (queueName: string) => void
+  onPurge?: (queueName: string, purgeDeadLetter?: boolean) => void
   refreshingQueues?: Set<string>
+  purgingQueues?: Set<string>
 }
 
-export function QueueTable({ queues, onQueueClick, onEdit, onDelete, onRefresh, refreshingQueues }: QueueTableProps) {
+export function QueueTable({ queues, onQueueClick, onEdit, onDelete, onRefresh, onPurge, refreshingQueues, purgingQueues }: QueueTableProps) {
   const formatNumber = (num: number | undefined) => {
     if (num === undefined || num === null) return "0"
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
@@ -175,6 +177,28 @@ export function QueueTable({ queues, onQueueClick, onEdit, onDelete, onRefresh, 
                         <Edit className="h-4 w-4 mr-2" />
                         Edit
                       </DropdownMenuItem>
+                      {onPurge && (
+                        <>
+                          <DropdownMenuItem
+                            onClick={() => onPurge(queue.name, false)}
+                            disabled={purgingQueues?.has(queue.name)}
+                            className="text-destructive"
+                          >
+                            <X className="h-4 w-4 mr-2" />
+                            Purge Queue
+                          </DropdownMenuItem>
+                          {queue.deadLetterMessageCount && queue.deadLetterMessageCount > 0 && (
+                            <DropdownMenuItem
+                              onClick={() => onPurge(queue.name, true)}
+                              disabled={purgingQueues?.has(queue.name)}
+                              className="text-destructive"
+                            >
+                              <X className="h-4 w-4 mr-2" />
+                              Purge Dead Letter
+                            </DropdownMenuItem>
+                          )}
+                        </>
+                      )}
                       <DropdownMenuItem
                         onClick={() => onDelete(queue.name)}
                         className="text-destructive"

@@ -68,24 +68,6 @@ export function useMessages() {
     [currentConnection]
   )
 
-  const receiveMessages = useCallback(
-    async (queueName: string, maxCount: number = 10): Promise<ServiceBusMessage[]> => {
-      if (!currentConnection) return []
-
-      setLoading(true)
-      setError(null)
-      try {
-        return await apiClient.receiveMessages(currentConnection, queueName, maxCount)
-      } catch (err: any) {
-        setError(err.message || "Failed to receive messages")
-        return []
-      } finally {
-        setLoading(false)
-      }
-    },
-    [currentConnection]
-  )
-
   const sendMessage = useCallback(
     async (queueName: string, message: ServiceBusMessage): Promise<boolean> => {
       if (!currentConnection) return false
@@ -130,7 +112,6 @@ export function useMessages() {
     peekMessages,
     peekMessagesFromSubscription,
     peekDeadLetterMessages,
-    receiveMessages,
     sendMessage,
     sendMessageToTopic,
   }

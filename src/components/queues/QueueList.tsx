@@ -15,14 +15,15 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useEffect } from "react"
 
 export function QueueList() {
-  const { queues, loading, error, sortBy, setSortBy, refresh, refreshQueue, deleteQueue } = useQueues()
-  const { currentConnection, currentConnectionId } = useConnections()
+  const { queues, loading, error, sortBy, setSortBy, refresh, refreshQueue, deleteQueue, purgeQueue } = useQueues()
+  const { currentConnectionId } = useConnections()
   const [selectedQueue, setSelectedQueue] = useState<QueueProperties | null>(null)
   const [selectedQueueForMessages, setSelectedQueueForMessages] = useState<string | null>(null)
   const [showDetails, setShowDetails] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [refreshingQueues, setRefreshingQueues] = useState<Set<string>>(new Set())
+  const [purgingQueues, setPurgingQueues] = useState<Set<string>>(new Set())
 
   // Clear selected queue when connection changes
   useEffect(() => {
@@ -55,6 +56,31 @@ export function QueueList() {
       await refreshQueue(queueName)
     } finally {
       setRefreshingQueues((prev) => {
+        const next = new Set(prev)
+        next.delete(queueName)
+        return next
+      })
+    }
+  }
+
+  const handlePurgeQueue = async (queueName: string, purgeDeadLetter: boolean = false) => {
+    const confirmMessage = purgeDeadLetter
+      ? `Are you sure you want to purge all dead letter messages from "${queueName}"? This action cannot be undone.`
+      : `Are you sure you want to purge all messages from "${queueName}"? This action cannot be undone.`
+    
+    if (!confirm(confirmMessage)) {
+      return
+    }
+
+    setPurgingQueues((prev) => new Set(prev).add(queueName))
+    try {
+      const purgedCount = await purgeQueue(queueName, purgeDeadLetter)
+      alert(`Successfully purged ${purgedCount} message${purgedCount !== 1 ? "s" : ""} from ${queueName}`)
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error"
+      alert(`Failed to purge queue: ${errorMessage}`)
+    } finally {
+      setPurgingQueues((prev) => {
         const next = new Set(prev)
         next.delete(queueName)
         return next
@@ -132,7 +158,9 @@ export function QueueList() {
                 }}
                 onDelete={handleDelete}
                 onRefresh={handleRefreshQueue}
+                onPurge={handlePurgeQueue}
                 refreshingQueues={refreshingQueues}
+                purgingQueues={purgingQueues}
               />
             </>
           )}

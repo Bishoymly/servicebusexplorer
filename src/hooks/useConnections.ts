@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { usePathname } from "next/navigation"
 import type { ServiceBusConnection } from "@/types/azure"
 import {
   loadConnections,
@@ -13,57 +14,77 @@ import {
 } from "@/lib/storage/connections"
 
 export function useConnections() {
+  const pathname = usePathname()
   const [connections, setConnections] = useState<ServiceBusConnection[]>([])
-  // Initialize currentConnectionId from localStorage synchronously
-  const [currentConnectionId, setCurrentConnectionId] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null
-    const loaded = loadConnections()
-    if (loaded.length > 0) {
-      const savedConnectionId = loadCurrentConnectionId()
-      if (savedConnectionId && loaded.some((c) => c.id === savedConnectionId)) {
-        return savedConnectionId
-      }
-      return loaded[0].id
+  // Always start with null to avoid hydration mismatch
+  const [currentConnectionId, setCurrentConnectionId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  // Extract connection name from URL if present
+  const getConnectionNameFromUrl = useCallback(() => {
+    if (!pathname || pathname === "/") return null
+    // Match patterns like /DEV/queues or /DEV/topics
+    const match = pathname.match(/^\/([^/]+)\/(queues|topics)/)
+    if (match) {
+      return decodeURIComponent(match[1])
     }
     return null
-  })
-  const [loading, setLoading] = useState(true)
+  }, [pathname])
 
   useEffect(() => {
     const loaded = loadConnections()
     setConnections(loaded)
     
     if (loaded.length > 0) {
-      // Ensure currentConnectionId is set if not already set
-      if (!currentConnectionId) {
-        const savedConnectionId = loadCurrentConnectionId()
-        if (savedConnectionId && loaded.some((c) => c.id === savedConnectionId)) {
-          setCurrentConnectionId(savedConnectionId)
-        } else {
-          setCurrentConnectionId(loaded[0].id)
+      // First, check if URL contains a connection name
+      const urlConnectionName = getConnectionNameFromUrl()
+      if (urlConnectionName) {
+        const urlConnection = loaded.find((c) => c.name === urlConnectionName)
+        if (urlConnection) {
+          setCurrentConnectionId(urlConnection.id)
+          setLoading(false)
+          return
         }
+      }
+      
+      // If no URL connection, load saved connection ID from localStorage
+      const savedConnectionId = loadCurrentConnectionId()
+      if (savedConnectionId && loaded.some((c) => c.id === savedConnectionId)) {
+        setCurrentConnectionId(savedConnectionId)
       } else {
-        // Validate that currentConnectionId still exists
-        if (!loaded.some((c) => c.id === currentConnectionId)) {
-          const savedConnectionId = loadCurrentConnectionId()
-          if (savedConnectionId && loaded.some((c) => c.id === savedConnectionId)) {
-            setCurrentConnectionId(savedConnectionId)
-          } else {
-            setCurrentConnectionId(loaded[0].id)
-          }
-        }
+        // Default to first connection if no saved ID or saved ID doesn't exist
+        setCurrentConnectionId(loaded[0].id)
       }
     } else {
       setCurrentConnectionId(null)
     }
     
     setLoading(false)
-  }, []) // Only run on mount
+  }, [getConnectionNameFromUrl]) // Include getConnectionNameFromUrl in dependencies
 
-  // Save connection ID whenever it changes
+  // Sync connection ID with URL when pathname changes (priority over localStorage)
   useEffect(() => {
-    saveCurrentConnectionId(currentConnectionId)
-  }, [currentConnectionId])
+    if (loading || connections.length === 0) return
+    
+    const urlConnectionName = getConnectionNameFromUrl()
+    if (urlConnectionName) {
+      const urlConnection = connections.find((c) => c.name === urlConnectionName)
+      if (urlConnection && urlConnection.id !== currentConnectionId) {
+        setCurrentConnectionId(urlConnection.id)
+        // Also save to localStorage so it persists
+        saveCurrentConnectionId(urlConnection.id)
+      }
+    }
+  }, [pathname, connections, loading, getConnectionNameFromUrl]) // Removed currentConnectionId from deps to avoid loops
+
+  // Save connection ID whenever it changes (for non-URL routes)
+  useEffect(() => {
+    const urlConnectionName = getConnectionNameFromUrl()
+    // Save if not on a connection-specific route, or if it's a manual change
+    if (!urlConnectionName && currentConnectionId) {
+      saveCurrentConnectionId(currentConnectionId)
+    }
+  }, [currentConnectionId, getConnectionNameFromUrl])
 
   const addConnection = useCallback((connection: ServiceBusConnection) => {
     addConnectionStorage(connection)

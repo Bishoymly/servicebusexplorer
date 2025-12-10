@@ -160,6 +160,22 @@ export function useQueues() {
     [currentConnection]
   )
 
+  const purgeQueue = useCallback(
+    async (queueName: string, purgeDeadLetter: boolean = false): Promise<number> => {
+      if (!currentConnection) return 0
+      try {
+        const purgedCount = await apiClient.purgeQueue(currentConnection, queueName, purgeDeadLetter)
+        // Refresh the queue to update message counts
+        await refreshQueue(queueName)
+        return purgedCount
+      } catch (err: any) {
+        setError(err.message || "Failed to purge queue")
+        return 0
+      }
+    },
+    [currentConnection, refreshQueue]
+  )
+
   const handleSetSortBy = useCallback((value: QueueSortOption) => {
     setSortBy(value)
     saveQueueSortPreference(value)
@@ -202,6 +218,7 @@ export function useQueues() {
     setSortBy: handleSetSortBy,
     refresh,
     refreshQueue,
+    purgeQueue,
     getQueue,
     updateQueue,
     createQueue,

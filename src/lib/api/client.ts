@@ -204,24 +204,6 @@ class ApiClient {
     return data.messages
   }
 
-  async receiveMessages(
-    connection: ServiceBusConnection | null,
-    queueName: string,
-    maxCount: number = 10
-  ): Promise<ServiceBusMessage[]> {
-    const response = await fetch("/api/messages/receive", {
-      method: "POST",
-      headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ queueName, maxCount }),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to receive messages")
-    }
-    const data = await response.json()
-    return data.messages
-  }
-
   async sendMessage(
     connection: ServiceBusConnection | null,
     queueName: string,
@@ -252,6 +234,24 @@ class ApiClient {
       const error = await response.json()
       throw new Error(error.error || "Failed to send message")
     }
+  }
+
+  async purgeQueue(
+    connection: ServiceBusConnection | null,
+    queueName: string,
+    purgeDeadLetter: boolean = false
+  ): Promise<number> {
+    const response = await fetch("/api/messages/purge", {
+      method: "POST",
+      headers: this.getConnectionHeader(connection),
+      body: JSON.stringify({ queueName, purgeDeadLetter }),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || "Failed to purge queue")
+    }
+    const data = await response.json()
+    return data.purgedCount
   }
 }
 

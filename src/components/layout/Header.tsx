@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useConnections } from "@/hooks/useConnections"
@@ -10,6 +10,11 @@ export function Header() {
   const pathname = usePathname()
   const router = useRouter()
   const { connections, currentConnectionId, setCurrentConnectionId, currentConnection } = useConnections()
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const handleConnectionChange = (newConnectionId: string) => {
     setCurrentConnectionId(newConnectionId)
@@ -33,23 +38,31 @@ export function Header() {
       <div className="flex items-center gap-4 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted-foreground">Connection:</span>
-          <Select value={currentConnectionId || undefined} onValueChange={handleConnectionChange}>
-            <SelectTrigger className="w-[300px]">
-              <SelectValue placeholder="Select a connection" />
-            </SelectTrigger>
-            <SelectContent>
-              {connections.map((connection) => (
-                <SelectItem key={connection.id} value={connection.id}>
-                  <div className="flex items-center gap-2">
-                    {connection.name}
-                    {connection.useAzureAD && (
-                      <span className="text-xs text-muted-foreground">({connection.namespace})</span>
-                    )}
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {mounted ? (
+            <Select value={currentConnectionId || undefined} onValueChange={handleConnectionChange}>
+              <SelectTrigger className="w-[300px]">
+                <SelectValue placeholder="Select a connection" />
+              </SelectTrigger>
+              <SelectContent>
+                {connections.map((connection) => (
+                  <SelectItem key={connection.id} value={connection.id}>
+                    <div className="flex items-center gap-2">
+                      {connection.name}
+                      {connection.useAzureAD && (
+                        <span className="text-xs text-muted-foreground">({connection.namespace})</span>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Select disabled>
+              <SelectTrigger className="w-[300px]">
+                <SelectValue placeholder="Select a connection" />
+              </SelectTrigger>
+            </Select>
+          )}
         </div>
         {currentConnection && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
