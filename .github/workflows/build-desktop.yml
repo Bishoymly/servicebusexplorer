@@ -120,7 +120,15 @@ jobs:
         run: |
           echo "Checking for build artifacts..."
           if [ "${{ matrix.platform }}" == "windows-latest" ]; then
-            ls -la src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/ || echo "No MSI files found"
+            echo "=== Windows Build Artifacts ==="
+            echo "Checking MSI directory:"
+            ls -la src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/ 2>&1 || echo "MSI directory not found"
+            echo ""
+            echo "Checking bundle directory:"
+            ls -la src-tauri/target/x86_64-pc-windows-msvc/release/bundle/ 2>&1 || echo "Bundle directory not found"
+            echo ""
+            echo "Checking for any MSI files:"
+            find src-tauri/target/x86_64-pc-windows-msvc/release/bundle -name "*.msi" 2>&1 || echo "No MSI files found"
           elif [ "${{ matrix.platform }}" == "macos-latest" ]; then
             if [ "${{ matrix.args }}" == "--target x86_64-apple-darwin" ]; then
               ls -la src-tauri/target/x86_64-apple-darwin/release/bundle/macos/ || echo "No macOS x64 app found"
@@ -128,6 +136,14 @@ jobs:
               ls -la src-tauri/target/aarch64-apple-darwin/release/bundle/macos/ || echo "No macOS ARM64 app found"
             fi
           else
-            ls -la src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/ || echo "No DEB files found"
+            echo "=== Linux Build Artifacts ==="
+            echo "Checking DEB directory:"
+            ls -la src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/ 2>&1 || echo "DEB directory not found"
+            echo ""
+            echo "Checking bundle directory:"
+            ls -la src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/ 2>&1 || echo "Bundle directory not found"
+            echo ""
+            echo "Checking for any DEB files:"
+            find src-tauri/target/x86_64-unknown-linux-gnu/release/bundle -name "*.deb" 2>&1 || echo "No DEB files found"
           fi
 
