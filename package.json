@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start:tauri": "node start-server.js",
     "lint": "eslint",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
