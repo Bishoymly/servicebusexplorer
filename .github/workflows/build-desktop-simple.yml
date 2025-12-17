@@ -2,6 +2,12 @@ name: Build Desktop App (Simple)
 
 # Simpler workflow that builds without creating releases
 # Useful for testing or when you want to manually create releases
+#
+# Differences from build-desktop.yml:
+# - Triggers on push to main/develop (not just version tags)
+# - Does NOT create GitHub Releases automatically
+# - Artifacts are uploaded to workflow run (7 day retention)
+# - Same signing/notarization support as main workflow
 
 on:
   workflow_dispatch:
@@ -53,11 +59,19 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build frontend
-        run: npm run build
-
       - name: Build Tauri app
-        run: npm run tauri:build -- --target ${{ matrix.target }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        with:
+          projectPath: .
+          args: --target ${{ matrix.target }}
 
       - name: Upload Windows artifacts
         if: matrix.platform == 'windows-latest'

@@ -1,5 +1,9 @@
 name: Build Desktop App
 
+# Main workflow that creates GitHub Releases automatically
+# Triggers on version tags (e.g., v1.0.0) and creates draft releases
+# For simpler builds without releases, use build-desktop-simple.yml
+
 on:
   push:
     tags:
@@ -68,6 +72,8 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
         with:
           projectPath: .
           args: ${{ matrix.args }}

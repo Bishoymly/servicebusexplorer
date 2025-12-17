@@ -85,7 +85,26 @@ The full string (including "Developer ID Application:") is your `APPLE_SIGNING_I
 Example:
 - `Developer ID Application: John Doe (ABC123DEF4)`
 
-### 6. Add Secrets to GitHub
+### 6. Create App-Specific Password for Notarization
+
+macOS requires notarization for apps distributed outside the App Store. You need an app-specific password:
+
+1. Go to [Apple ID Account Page](https://appleid.apple.com/)
+2. Sign in with your Apple ID
+3. In the **Security** section, find **App-Specific Passwords**
+4. Click **Generate Password...**
+5. Enter a label (e.g., "GitHub Actions Notarization")
+6. Click **Create**
+7. **Copy the password immediately** - you won't be able to see it again!
+   - This is your `APPLE_APP_SPECIFIC_PASSWORD`
+   - Format: `xxxx-xxxx-xxxx-xxxx` (four groups of four characters)
+
+**Important:** 
+- Use your Apple ID email (the one associated with your Developer account) as `APPLE_ID`
+- The app-specific password is different from your regular Apple ID password
+- You can create multiple app-specific passwords for different services
+
+### 7. Add Secrets to GitHub
 
 1. Go to your GitHub repository
 2. Navigate to **Settings** → **Secrets and variables** → **Actions**
@@ -107,13 +126,38 @@ Example:
    - Name: `APPLE_TEAM_ID`
    - Value: Your Team ID from step 1 (e.g., `ABC123DEF4`)
 
+   **APPLE_ID:**
+   - Name: `APPLE_ID`
+   - Value: Your Apple ID email address (e.g., `your.email@example.com`)
+
+   **APPLE_APP_SPECIFIC_PASSWORD:**
+   - Name: `APPLE_APP_SPECIFIC_PASSWORD`
+   - Value: The app-specific password from step 6 (e.g., `abcd-efgh-ijkl-mnop`)
+
 ## Verification
 
 After adding the secrets, trigger a build and check:
 
 1. The build should complete successfully
 2. DMG files should be created and uploaded as artifacts
-3. The DMG files should be properly signed (you can verify this by downloading and checking)
+3. The app should be properly signed AND notarized
+4. Users should be able to open the app without "damaged" errors
+
+### Verify Signing and Notarization
+
+After downloading the DMG and installing the app, verify it's properly signed and notarized:
+
+**Check code signature:**
+```bash
+codesign --verify --verbose=4 "/Applications/Azure Service Bus Explorer.app"
+```
+
+**Check notarization:**
+```bash
+spctl -a -t exec -vv "/Applications/Azure Service Bus Explorer.app"
+```
+
+If properly notarized, this should return "accepted" and the app should open without warnings.
 
 ## Troubleshooting
 
@@ -132,6 +176,12 @@ After adding the secrets, trigger a build and check:
 ### Team ID Issues
 - Verify your Team ID is correct (it's case-sensitive)
 - Make sure you're using the Team ID, not your Apple ID
+
+### Notarization Issues
+- Ensure `APPLE_ID` matches the email associated with your Developer account
+- Verify the app-specific password is correct (format: `xxxx-xxxx-xxxx-xxxx`)
+- Check that your Developer account has notarization enabled (should be automatic with paid account)
+- Notarization can take 5-15 minutes - check build logs for status
 
 ## Security Notes
 
