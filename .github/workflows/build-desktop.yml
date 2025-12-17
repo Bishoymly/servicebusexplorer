@@ -24,11 +24,11 @@ jobs:
           - platform: 'macos-latest'
             args: '--target x86_64-apple-darwin'
             artifact_name: 'macos-x64'
-            artifact_path: 'src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app'
+            artifact_path: 'src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg'
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
             artifact_name: 'macos-arm64'
-            artifact_path: 'src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app'
+            artifact_path: 'src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg'
           - platform: 'ubuntu-latest'
             args: '--target x86_64-unknown-linux-gnu'
             artifact_name: 'linux-x64'
@@ -64,12 +64,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # For ad-hoc signing, use "-" as the identity (no certificate needed)
-          # For proper signing, configure these secrets:
-          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: .
           args: ${{ matrix.args }}
@@ -93,7 +91,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: src-tauri/target/x86_64-apple-darwin/release/bundle/macos/*.app
+          path: src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
           retention-days: 30
           if-no-files-found: warn
 
@@ -102,7 +100,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           retention-days: 30
           if-no-files-found: warn
 
@@ -130,10 +128,25 @@ jobs:
             echo "Checking for any MSI files:"
             find src-tauri/target/x86_64-pc-windows-msvc/release/bundle -name "*.msi" 2>&1 || echo "No MSI files found"
           elif [ "${{ matrix.platform }}" == "macos-latest" ]; then
+            echo "=== macOS Build Artifacts ==="
             if [ "${{ matrix.args }}" == "--target x86_64-apple-darwin" ]; then
-              ls -la src-tauri/target/x86_64-apple-darwin/release/bundle/macos/ || echo "No macOS x64 app found"
+              echo "Checking DMG directory (x64):"
+              ls -la src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/ 2>&1 || echo "DMG directory not found"
+              echo ""
+              echo "Checking bundle directory (x64):"
+              ls -la src-tauri/target/x86_64-apple-darwin/release/bundle/ 2>&1 || echo "Bundle directory not found"
+              echo ""
+              echo "Checking for any DMG files (x64):"
+              find src-tauri/target/x86_64-apple-darwin/release/bundle -name "*.dmg" 2>&1 || echo "No DMG files found"
             else
-              ls -la src-tauri/target/aarch64-apple-darwin/release/bundle/macos/ || echo "No macOS ARM64 app found"
+              echo "Checking DMG directory (ARM64):"
+              ls -la src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/ 2>&1 || echo "DMG directory not found"
+              echo ""
+              echo "Checking bundle directory (ARM64):"
+              ls -la src-tauri/target/aarch64-apple-darwin/release/bundle/ 2>&1 || echo "Bundle directory not found"
+              echo ""
+              echo "Checking for any DMG files (ARM64):"
+              find src-tauri/target/aarch64-apple-darwin/release/bundle -name "*.dmg" 2>&1 || echo "No DMG files found"
             fi
           else
             echo "=== Linux Build Artifacts ==="
