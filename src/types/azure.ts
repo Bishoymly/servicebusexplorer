@@ -80,4 +80,6 @@ export interface ServiceBusMessage {
 }
 
 export type QueueSortOption = "name" | "messageCount" | "deadLetterCount"
+export type TopicSortOption = "name" | "subscriptionCount"
+export type SubscriptionSortOption = "name" | "messageCount" | "deadLetterCount"
 

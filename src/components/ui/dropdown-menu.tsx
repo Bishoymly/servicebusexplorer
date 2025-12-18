@@ -120,20 +120,23 @@ const DropdownMenuContent = React.forwardRef<
   if (!open || !anchorEl) return null
 
   const rect = anchorEl.getBoundingClientRect()
-  let left = rect.left
-  if (align === "end") {
-    left = rect.right
-  } else if (align === "center") {
-    left = rect.left + rect.width / 2
-  }
-
-  const style: React.CSSProperties = {
+  
+  let style: React.CSSProperties = {
     position: "fixed",
     top: rect.bottom + sideOffset,
-    left: align === "end" ? undefined : left,
-    right: align === "end" ? window.innerWidth - rect.right : undefined,
-    transform: align === "end" ? "translateX(-100%)" : align === "center" ? "translateX(-50%)" : undefined,
     zIndex: 50,
+  }
+
+  if (align === "end") {
+    // Position from the right edge of the trigger
+    style.right = window.innerWidth - rect.right
+    style.transform = "translateX(0)"
+  } else if (align === "center") {
+    style.left = rect.left + rect.width / 2
+    style.transform = "translateX(-50%)"
+  } else {
+    // align === "start" (default)
+    style.left = rect.left
   }
 
   if (typeof window === "undefined") return null

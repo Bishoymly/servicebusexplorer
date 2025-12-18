@@ -1,62 +1,79 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { RefreshCw, Trash2, Send } from "lucide-react"
+import { RefreshCw, Trash2, Send, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { InlineMessageViewer } from "./InlineMessageViewer"
 import { MessageEditor } from "@/components/messages/MessageEditor"
 import { useMessages } from "@/hooks/useMessages"
-import { useConnections } from "@/hooks/useConnections"
 import { useQueues } from "@/hooks/useQueues"
-import type { ServiceBusMessage } from "@/types/azure"
+import type { ServiceBusMessage, ServiceBusConnection, QueueProperties } from "@/types/azure"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Badge } from "@/components/ui/badge"
 
 interface QueueMessagesPanelProps {
   queueName: string
+  connection: ServiceBusConnection
   initialShowDeadLetter?: boolean
   onClose?: () => void
 }
 
-export function QueueMessagesPanel({ queueName, initialShowDeadLetter = false, onClose }: QueueMessagesPanelProps) {
-  const { peekMessages, peekDeadLetterMessages, loading, error } = useMessages()
-  const { currentConnection, currentConnectionId, loading: connectionsLoading } = useConnections()
-  const { purgeQueue, refreshQueue } = useQueues()
+export function QueueMessagesPanel({ queueName, connection, initialShowDeadLetter = false, onClose }: QueueMessagesPanelProps) {
+  const { peekMessages, peekDeadLetterMessages, loading, error } = useMessages(connection)
+  const { purgeQueue, refreshQueue, getQueue } = useQueues(connection)
   const [messages, setMessages] = useState<ServiceBusMessage[]>([])
   const [maxCount, setMaxCount] = useState(100)
-  const [showDeadLetter, setShowDeadLetter] = useState(initialShowDeadLetter)
+  const [activeTab, setActiveTab] = useState<"active" | "deadletter">(initialShowDeadLetter ? "deadletter" : "active")
   const [purging, setPurging] = useState(false)
   const [showSendDialog, setShowSendDialog] = useState(false)
+  const [queueProperties, setQueueProperties] = useState<QueueProperties | null>(null)
 
-  // Update showDeadLetter when initialShowDeadLetter prop changes
+  // Update activeTab when initialShowDeadLetter prop changes
   useEffect(() => {
-    setShowDeadLetter(initialShowDeadLetter)
+    setActiveTab(initialShowDeadLetter ? "deadletter" : "active")
   }, [initialShowDeadLetter])
 
   const loadMessages = useCallback(async () => {
     // Don't load if connection is not ready
-    if (!currentConnection || connectionsLoading || !queueName) {
+    if (!connection || !queueName) {
       return
     }
     
     setMessages([])
     try {
-      if (showDeadLetter) {
+      if (activeTab === "deadletter") {
         const msgs = await peekDeadLetterMessages(queueName, maxCount)
         setMessages(msgs)
       } else {
+        // Active messages - peek regular messages
         const msgs = await peekMessages(queueName, maxCount)
         setMessages(msgs)
       }
     } catch (err) {
       console.error("Failed to load messages:", err)
     }
-  }, [queueName, showDeadLetter, maxCount, currentConnection, connectionsLoading, peekMessages, peekDeadLetterMessages])
+  }, [queueName, activeTab, maxCount, connection, peekMessages, peekDeadLetterMessages])
 
-  // Load messages when queueName, showDeadLetter, maxCount, or connection changes
+  // Load queue properties
+  useEffect(() => {
+    const loadQueueProperties = async () => {
+      if (!queueName) return
+      try {
+        const queue = await getQueue(queueName)
+        if (queue) {
+          setQueueProperties(queue)
+        }
+      } catch (err) {
+        console.error("Failed to load queue properties:", err)
+      }
+    }
+    loadQueueProperties()
+  }, [queueName, getQueue])
+
+  // Load messages when queueName, activeTab, maxCount, or connection changes
   useEffect(() => {
     loadMessages()
   }, [loadMessages])
@@ -67,7 +84,7 @@ export function QueueMessagesPanel({ queueName, initialShowDeadLetter = false, o
   }
 
   const handlePurge = async () => {
-    const confirmMessage = showDeadLetter
+    const confirmMessage = activeTab === "deadletter"
       ? `Are you sure you want to purge all dead letter messages from "${queueName}"? This action cannot be undone.`
       : `Are you sure you want to purge all messages from "${queueName}"? This action cannot be undone.`
     
@@ -77,12 +94,17 @@ export function QueueMessagesPanel({ queueName, initialShowDeadLetter = false, o
 
     setPurging(true)
     try {
-      const purgedCount = await purgeQueue(queueName, showDeadLetter)
+      const purgedCount = await purgeQueue(queueName, activeTab === "deadletter")
       alert(`Successfully purged ${purgedCount} message${purgedCount !== 1 ? "s" : ""} from ${queueName}`)
       // Reload messages after purge
       await loadMessages()
       // Refresh queue counts
       await refreshQueue(queueName)
+      // Reload queue properties to update badges
+      const queue = await getQueue(queueName)
+      if (queue) {
+        setQueueProperties(queue)
+      }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error"
       alert(`Failed to purge queue: ${errorMessage}`)
@@ -96,42 +118,54 @@ export function QueueMessagesPanel({ queueName, initialShowDeadLetter = false, o
     await loadMessages()
     // Refresh queue counts
     await refreshQueue(queueName)
+    // Reload queue properties to update badges
+    const queue = await getQueue(queueName)
+    if (queue) {
+      setQueueProperties(queue)
+    }
   }
 
   return (
-    <div className="h-full flex flex-col border-l bg-background">
+    <div className="h-full flex flex-col bg-background">
       {/* Header */}
       <div className="border-b px-4 py-3">
         <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="font-semibold text-lg">{queueName}</h3>
-            <p className="text-sm text-muted-foreground">
-              {messages.length} message{messages.length !== 1 ? "s" : ""}
-            </p>
-          </div>
+          <h3 className="font-semibold text-lg">{queueName}</h3>
           {onClose && (
             <Button variant="ghost" size="icon" onClick={onClose}>
-              ×
+              <X className="h-4 w-4" />
             </Button>
           )}
         </div>
 
         <div className="flex items-center gap-2">
-          <Tabs value={showDeadLetter ? "deadletter" : "peek"} onValueChange={(v) => {
-            if (v === "deadletter") {
-              setShowDeadLetter(true)
-            } else {
-              setShowDeadLetter(false)
+          <Tabs value={activeTab} onValueChange={(v) => {
+            if (v === "active" || v === "deadletter") {
+              setActiveTab(v)
             }
           }}>
             <TabsList>
-              <TabsTrigger value="peek">Peek</TabsTrigger>
-              <TabsTrigger value="deadletter">Dead Letter</TabsTrigger>
+              <TabsTrigger value="active" className="flex items-center gap-1.5">
+                Active
+                {queueProperties?.activeMessageCount !== undefined && queueProperties.activeMessageCount > 0 && (
+                  <Badge variant="secondary" className="h-4 px-1 text-xs">
+                    {queueProperties.activeMessageCount}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="deadletter" className="flex items-center gap-1.5">
+                Dead Letter
+                {queueProperties?.deadLetterMessageCount !== undefined && queueProperties.deadLetterMessageCount > 0 && (
+                  <Badge variant="destructive" className="h-4 px-1 text-xs">
+                    {queueProperties.deadLetterMessageCount}
+                  </Badge>
+                )}
+              </TabsTrigger>
             </TabsList>
           </Tabs>
 
           <div className="flex items-center gap-2 ml-auto">
-            {!showDeadLetter && (
+            {activeTab === "active" && (
               <Button
                 variant="default"
                 size="sm"
@@ -149,7 +183,7 @@ export function QueueMessagesPanel({ queueName, initialShowDeadLetter = false, o
               disabled={purging || loading}
             >
               <Trash2 className={`h-4 w-4 mr-2 ${purging ? "animate-spin" : ""}`} />
-              Purge {showDeadLetter ? "Dead Letter" : "Queue"}
+              Purge {activeTab === "deadletter" ? "Dead Letter" : "Queue"}
             </Button>
             <Label htmlFor="maxCount" className="text-xs text-muted-foreground">
               Max:
@@ -206,6 +240,7 @@ export function QueueMessagesPanel({ queueName, initialShowDeadLetter = false, o
         open={showSendDialog}
         onOpenChange={setShowSendDialog}
         queueName={queueName}
+        connection={connection}
         onSuccess={handleSendSuccess}
       />
     </div>

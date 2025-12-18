@@ -1,20 +1,21 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import type { QueueProperties, QueueSortOption } from "@/types/azure"
+import type { QueueProperties, QueueSortOption, ServiceBusConnection } from "@/types/azure"
 import { apiClient } from "@/lib/api/client"
 import { useConnections } from "./useConnections"
 import { loadQueueSortPreference, saveQueueSortPreference } from "@/lib/storage/preferences"
 
-export function useQueues() {
+export function useQueues(connectionOverride?: ServiceBusConnection | null) {
   const { currentConnection, currentConnectionId, loading: connectionsLoading, connections } = useConnections()
+  const connection = connectionOverride ?? currentConnection
   const [queues, setQueues] = useState<QueueProperties[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<QueueSortOption>(() => loadQueueSortPreference())
 
   const loadQueues = useCallback(async () => {
-    if (!currentConnection) {
+    if (!connection) {
       setQueues([])
       return
     }
@@ -26,7 +27,7 @@ export function useQueues() {
     try {
       // Start loading queues - the API will return queues progressively
       // Show names immediately, then update with counts as they load
-      const loadedQueues = await apiClient.listQueues(currentConnection)
+      const loadedQueues = await apiClient.listQueues(connection)
       
       // Set all queues at once - they're already loaded with names first, then counts
       // This is faster than progressive rendering since the API handles batching
@@ -36,7 +37,7 @@ export function useQueues() {
     } finally {
       setLoading(false)
     }
-  }, [currentConnection])
+  }, [connection])
 
   useEffect(() => {
     // Wait for connections to finish loading before trying to load queues
@@ -79,7 +80,7 @@ export function useQueues() {
       case "name":
         return a.name.localeCompare(b.name)
       case "messageCount":
-        return (b.messageCount || 0) - (a.messageCount || 0)
+        return (b.activeMessageCount || 0) - (a.activeMessageCount || 0)
       case "deadLetterCount":
         return (b.deadLetterMessageCount || 0) - (a.deadLetterMessageCount || 0)
       default:
@@ -89,22 +90,22 @@ export function useQueues() {
 
   const getQueue = useCallback(
     async (queueName: string): Promise<QueueProperties | null> => {
-      if (!currentConnection) return null
+      if (!connection) return null
       try {
-        return await apiClient.getQueue(currentConnection, queueName)
+        return await apiClient.getQueue(connection, queueName)
       } catch (err: any) {
         setError(err.message || "Failed to get queue properties")
         return null
       }
     },
-    [currentConnection]
+    [connection]
   )
 
   const updateQueue = useCallback(
     async (queueName: string, properties: Partial<QueueProperties>): Promise<boolean> => {
-      if (!currentConnection) return false
+      if (!connection) return false
       try {
-        await apiClient.updateQueue(currentConnection, queueName, properties)
+        await apiClient.updateQueue(connection, queueName, properties)
         await loadQueues()
         return true
       } catch (err: any) {
@@ -112,14 +113,14 @@ export function useQueues() {
         return false
       }
     },
-    [currentConnection, loadQueues]
+    [connection, loadQueues]
   )
 
   const createQueue = useCallback(
     async (queueName: string, properties?: Partial<QueueProperties>): Promise<boolean> => {
-      if (!currentConnection) return false
+      if (!connection) return false
       try {
-        await apiClient.createQueue(currentConnection, queueName, properties)
+        await apiClient.createQueue(connection, queueName, properties)
         await loadQueues()
         return true
       } catch (err: any) {
@@ -127,14 +128,14 @@ export function useQueues() {
         return false
       }
     },
-    [currentConnection, loadQueues]
+    [connection, loadQueues]
   )
 
   const deleteQueue = useCallback(
     async (queueName: string): Promise<boolean> => {
-      if (!currentConnection) return false
+      if (!connection) return false
       try {
-        await apiClient.deleteQueue(currentConnection, queueName)
+        await apiClient.deleteQueue(connection, queueName)
         await loadQueues()
         return true
       } catch (err: any) {
@@ -142,14 +143,14 @@ export function useQueues() {
         return false
       }
     },
-    [currentConnection, loadQueues]
+    [connection, loadQueues]
   )
 
   const refreshQueue = useCallback(
     async (queueName: string): Promise<boolean> => {
-      if (!currentConnection) return false
+      if (!connection) return false
       try {
-        const updatedQueue = await apiClient.getQueue(currentConnection, queueName)
+        const updatedQueue = await apiClient.getQueue(connection, queueName)
         setQueues((prev) => prev.map((q) => (q.name === queueName ? updatedQueue : q)))
         return true
       } catch (err: any) {
@@ -157,14 +158,14 @@ export function useQueues() {
         return false
       }
     },
-    [currentConnection]
+    [connection]
   )
 
   const purgeQueue = useCallback(
     async (queueName: string, purgeDeadLetter: boolean = false): Promise<number> => {
-      if (!currentConnection) return 0
+      if (!connection) return 0
       try {
-        const purgedCount = await apiClient.purgeQueue(currentConnection, queueName, purgeDeadLetter)
+        const purgedCount = await apiClient.purgeQueue(connection, queueName, purgeDeadLetter)
         // Refresh the queue to update message counts
         await refreshQueue(queueName)
         return purgedCount
@@ -173,7 +174,7 @@ export function useQueues() {
         return 0
       }
     },
-    [currentConnection, refreshQueue]
+    [connection, refreshQueue]
   )
 
   const handleSetSortBy = useCallback((value: QueueSortOption) => {

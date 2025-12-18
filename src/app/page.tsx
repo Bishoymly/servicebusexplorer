@@ -1,19 +1,39 @@
-import { ConnectionManager } from "@/components/connections/ConnectionManager"
+"use client"
+
+import { QueueMessagesPanel } from "@/components/queues/QueueMessagesPanel"
+import { useSelectedResource } from "@/contexts/SelectedResourceContext"
+import { useConnections } from "@/hooks/useConnections"
 
 export default function Home() {
-  return (
-    <div className="h-full">
-      <div className="h-[calc(100vh-4rem)] flex flex-col overflow-hidden">
-        <div className="p-4 border-b">
-          <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground mt-2">
-            Welcome to Azure Service Bus Explorer. Manage your queues, topics, and messages.
-          </p>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4">
-          <ConnectionManager />
-        </div>
+  const { selectedResource, setSelectedResource } = useSelectedResource()
+  const { connections } = useConnections()
+  
+  // Check if the selected resource's connection is still valid
+  const isValidResource = selectedResource && connections.some(c => c.id === selectedResource.connectionId)
+
+  const handleCloseQueue = () => {
+    setSelectedResource(null)
+  }
+
+  if (selectedResource?.type === "queue" && isValidResource) {
+    const connection = connections.find(c => c.id === selectedResource.connectionId)
+    if (!connection) {
+      return <div className="h-full bg-background" />
+    }
+    
+    return (
+      <div className="h-full">
+        <QueueMessagesPanel 
+          queueName={selectedResource.name}
+          connection={connection}
+          initialShowDeadLetter={selectedResource.showDeadLetter || false}
+          onClose={handleCloseQueue} 
+        />
       </div>
-    </div>
+    )
+  }
+
+  return (
+    <div className="h-full bg-background" />
   );
 }

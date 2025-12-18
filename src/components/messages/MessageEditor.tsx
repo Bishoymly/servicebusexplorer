@@ -12,7 +12,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { useMessages } from "@/hooks/useMessages"
-import type { ServiceBusMessage } from "@/types/azure"
+import type { ServiceBusMessage, ServiceBusConnection } from "@/types/azure"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 interface MessageEditorProps {
@@ -21,6 +21,7 @@ interface MessageEditorProps {
   initialMessage?: ServiceBusMessage
   queueName?: string
   topicName?: string
+  connection?: ServiceBusConnection | null
   onSuccess: () => void
 }
 
@@ -30,9 +31,10 @@ export function MessageEditor({
   initialMessage,
   queueName,
   topicName,
+  connection,
   onSuccess,
 }: MessageEditorProps) {
-  const { sendMessage, sendMessageToTopic, loading } = useMessages()
+  const { sendMessage, sendMessageToTopic, loading } = useMessages(connection)
   const [body, setBody] = useState("")
   const [bodyFormat, setBodyFormat] = useState<"text" | "json">("text")
   const [messageId, setMessageId] = useState("")

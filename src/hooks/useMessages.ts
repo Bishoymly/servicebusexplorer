@@ -1,23 +1,24 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import type { ServiceBusMessage } from "@/types/azure"
+import type { ServiceBusMessage, ServiceBusConnection } from "@/types/azure"
 import { apiClient } from "@/lib/api/client"
 import { useConnections } from "./useConnections"
 
-export function useMessages() {
+export function useMessages(connectionOverride?: ServiceBusConnection | null) {
   const { currentConnection } = useConnections()
+  const connection = connectionOverride ?? currentConnection
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const peekMessages = useCallback(
     async (queueName: string, maxCount: number = 10): Promise<ServiceBusMessage[]> => {
-      if (!currentConnection) return []
+      if (!connection) return []
 
       setLoading(true)
       setError(null)
       try {
-        return await apiClient.peekMessages(currentConnection, queueName, undefined, undefined, maxCount)
+        return await apiClient.peekMessages(connection, queueName, undefined, undefined, maxCount)
       } catch (err: any) {
         setError(err.message || "Failed to peek messages")
         return []
@@ -25,7 +26,7 @@ export function useMessages() {
         setLoading(false)
       }
     },
-    [currentConnection]
+    [connection]
   )
 
   const peekMessagesFromSubscription = useCallback(
@@ -34,12 +35,12 @@ export function useMessages() {
       subscriptionName: string,
       maxCount: number = 10
     ): Promise<ServiceBusMessage[]> => {
-      if (!currentConnection) return []
+      if (!connection) return []
 
       setLoading(true)
       setError(null)
       try {
-        return await apiClient.peekMessages(currentConnection, undefined, topicName, subscriptionName, maxCount)
+        return await apiClient.peekMessages(connection, undefined, topicName, subscriptionName, maxCount)
       } catch (err: any) {
         setError(err.message || "Failed to peek messages")
         return []
@@ -47,17 +48,17 @@ export function useMessages() {
         setLoading(false)
       }
     },
-    [currentConnection]
+    [connection]
   )
 
   const peekDeadLetterMessages = useCallback(
     async (queueName: string, maxCount: number = 10): Promise<ServiceBusMessage[]> => {
-      if (!currentConnection) return []
+      if (!connection) return []
 
       setLoading(true)
       setError(null)
       try {
-        return await apiClient.peekDeadLetterMessages(currentConnection, queueName, maxCount)
+        return await apiClient.peekDeadLetterMessages(connection, queueName, maxCount)
       } catch (err: any) {
         setError(err.message || "Failed to peek dead letter messages")
         return []
@@ -65,17 +66,17 @@ export function useMessages() {
         setLoading(false)
       }
     },
-    [currentConnection]
+    [connection]
   )
 
   const sendMessage = useCallback(
     async (queueName: string, message: ServiceBusMessage): Promise<boolean> => {
-      if (!currentConnection) return false
+      if (!connection) return false
 
       setLoading(true)
       setError(null)
       try {
-        await apiClient.sendMessage(currentConnection, queueName, message)
+        await apiClient.sendMessage(connection, queueName, message)
         return true
       } catch (err: any) {
         setError(err.message || "Failed to send message")
@@ -84,17 +85,17 @@ export function useMessages() {
         setLoading(false)
       }
     },
-    [currentConnection]
+    [connection]
   )
 
   const sendMessageToTopic = useCallback(
     async (topicName: string, message: ServiceBusMessage): Promise<boolean> => {
-      if (!currentConnection) return false
+      if (!connection) return false
 
       setLoading(true)
       setError(null)
       try {
-        await apiClient.sendMessageToTopic(currentConnection, topicName, message)
+        await apiClient.sendMessageToTopic(connection, topicName, message)
         return true
       } catch (err: any) {
         setError(err.message || "Failed to send message")
@@ -103,7 +104,7 @@ export function useMessages() {
         setLoading(false)
       }
     },
-    [currentConnection]
+    [connection]
   )
 
   return {

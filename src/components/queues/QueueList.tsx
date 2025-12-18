@@ -17,7 +17,7 @@ import { useEffect } from "react"
 
 export function QueueList() {
   const { queues, loading, error, sortBy, setSortBy, refresh, refreshQueue, deleteQueue, purgeQueue } = useQueues()
-  const { currentConnectionId } = useConnections()
+  const { currentConnection, currentConnectionId } = useConnections()
   const [selectedQueue, setSelectedQueue] = useState<QueueProperties | null>(null)
   const [selectedQueueForMessages, setSelectedQueueForMessages] = useState<string | null>(null)
   const [showDeadLetterForQueue, setShowDeadLetterForQueue] = useState<string | null>(null)
@@ -227,10 +227,11 @@ export function QueueList() {
       </div>
 
       {/* Right Panel - Messages */}
-      {selectedQueueForMessages && (
+      {selectedQueueForMessages && currentConnection && (
         <div className="w-1/2 min-w-[500px]">
           <QueueMessagesPanel
             queueName={selectedQueueForMessages}
+            connection={currentConnection}
             initialShowDeadLetter={showDeadLetterForQueue === selectedQueueForMessages}
             onClose={() => {
               setSelectedQueueForMessages(null)
