@@ -4,10 +4,10 @@ const { spawn } = require('child_process');
 const path = require('path');
 
 const nextPath = path.join(__dirname, 'node_modules', '.bin', 'next');
-const server = spawn('node', [nextPath, 'start'], {
+const server = spawn('node', [nextPath, 'start', '-p', '1420'], {
   cwd: __dirname,
   stdio: 'inherit',
-  env: { ...process.env, PORT: '3000' }
+  env: { ...process.env, PORT: '1420' }
 });
 
 server.on('error', (err) => {

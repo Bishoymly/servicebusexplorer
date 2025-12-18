@@ -1,6 +1,6 @@
 # Privacy Policy for Azure Service Bus Explorer
 
-**Last Updated:** [Date]
+**Last Updated:** 12/17/2025
 
 ## Introduction
 
@@ -77,7 +77,6 @@ We may update this Privacy Policy from time to time. We will notify you of any c
 
 If you have questions about this Privacy Policy, please contact us:
 - **GitHub Issues**: [Create an issue](https://github.com/Bishoymly/servicebusexplorer/issues)
-- **Email**: [Your contact email if you have one]
 
 ## Compliance
 
