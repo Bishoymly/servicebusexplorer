@@ -9,21 +9,40 @@ import { Tree, type TreeNode } from "@/components/ui/tree"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ConnectionForm } from "@/components/connections/ConnectionForm"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { useSelectedResource } from "@/contexts/SelectedResourceContext"
 import type { ServiceBusConnection } from "@/types/azure"
 
 export function Sidebar() {
   const router = useRouter()
   const pathname = usePathname()
-  const { connections, addConnection } = useConnections()
+  const { connections, addConnection, removeConnection } = useConnections()
   const { selectedResource, setSelectedResource } = useSelectedResource()
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [connectionToDelete, setConnectionToDelete] = useState<{ id: string; name: string } | null>(null)
+  
+  const handleDeleteRequest = (connectionId: string, connectionName: string) => {
+    setConnectionToDelete({ id: connectionId, name: connectionName })
+    setDeleteDialogOpen(true)
+  }
+  
   const handleConnectionRemoved = (connectionId: string) => {
     // Clear selected resource if it belongs to the deleted connection
     if (selectedResource?.connectionId === connectionId) {
       setSelectedResource(null)
     }
   }
-  const { treeNodes } = useTreeData(handleConnectionRemoved)
+  
+  const handleConfirmDelete = () => {
+    if (connectionToDelete) {
+      removeConnection(connectionToDelete.id)
+      handleConnectionRemoved(connectionToDelete.id)
+      setDeleteDialogOpen(false)
+      setConnectionToDelete(null)
+    }
+  }
+  
+  const { treeNodes } = useTreeData(handleConnectionRemoved, handleDeleteRequest)
   const [searchTerm, setSearchTerm] = useState("")
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [formOpen, setFormOpen] = useState(false)
@@ -215,6 +234,34 @@ export function Sidebar() {
         onOpenChange={setFormOpen}
         onSubmit={handleAddConnection}
       />
+
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Delete Connection</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete the connection &quot;{connectionToDelete?.name}&quot;? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setDeleteDialogOpen(false)
+                setConnectionToDelete(null)
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

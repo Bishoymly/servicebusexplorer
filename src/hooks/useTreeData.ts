@@ -31,7 +31,7 @@ interface ConnectionTreeData {
   subscriptions: Record<string, SubscriptionProperties[]>
 }
 
-export function useTreeData(onConnectionRemoved?: (connectionId: string) => void) {
+export function useTreeData(onConnectionRemoved?: (connectionId: string) => void, onDeleteRequest?: (connectionId: string, connectionName: string) => void) {
   const { connections, currentConnectionId, removeConnection } = useConnections()
   const [connectionData, setConnectionData] = useState<Record<string, ConnectionTreeData>>({})
   const [loading, setLoading] = useState<Record<string, boolean>>({})
@@ -474,18 +474,28 @@ export function useTreeData(onConnectionRemoved?: (connectionId: string) => void
         })
       }
 
+      const handleDeleteConnection = (connectionId: string, connectionName: string) => {
+        if (onDeleteRequest) {
+          onDeleteRequest(connectionId, connectionName)
+        } else {
+          // Fallback to direct deletion if no callback provided
+          removeConnection(connectionId)
+          onConnectionRemoved?.(connectionId)
+        }
+      }
+
       const connectionDeleteAction = React.createElement(
         Button,
         {
+          key: `delete-${connection.id}`,
           variant: "ghost",
           size: "icon",
           className: "h-6 w-6",
-          onClick: (e: React.MouseEvent) => {
+          type: "button",
+          onClick: (e: React.MouseEvent<HTMLButtonElement>) => {
+            e.preventDefault()
             e.stopPropagation()
-            if (confirm(`Are you sure you want to remove connection "${connection.name}"?`)) {
-              removeConnection(connection.id)
-              onConnectionRemoved?.(connection.id)
-            }
+            handleDeleteConnection(connection.id, connection.name)
           },
         },
         React.createElement(Trash2, { className: "h-3 w-3" })
@@ -517,7 +527,7 @@ export function useTreeData(onConnectionRemoved?: (connectionId: string) => void
         isLoading: loading[connection.id],
       }
     })
-  }, [connections, connectionData, currentConnectionId, sortPreferences, handleRefreshQueues, handleRefreshTopics, handleSortChange, removeConnection, refreshConnection, loading])
+  }, [connections, connectionData, currentConnectionId, sortPreferences, handleRefreshQueues, handleRefreshTopics, handleSortChange, removeConnection, refreshConnection, loading, onConnectionRemoved, onDeleteRequest])
 
   const treeNodes = React.useMemo(() => buildTreeNodes(), [buildTreeNodes])
 

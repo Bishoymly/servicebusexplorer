@@ -126,8 +126,7 @@ const TreeNodeComponent: React.FC<{
         <span className="ml-auto flex items-center gap-1">
           {node.actions && (
             <span 
-              className="opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto"
-              onClick={(e) => e.stopPropagation()}
+              className="opacity-0 group-hover:opacity-100 transition-opacity"
             >
               {node.actions}
             </span>
@@ -135,10 +134,9 @@ const TreeNodeComponent: React.FC<{
           {node.refreshAction && (
             <span 
               className={cn(
-                "transition-opacity pointer-events-auto",
+                "transition-opacity",
                 node.isLoading ? "opacity-100" : "opacity-0 group-hover:opacity-100"
               )}
-              onClick={(e) => e.stopPropagation()}
             >
               {node.refreshAction}
             </span>
