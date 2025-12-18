@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
@@ -100,12 +100,15 @@ fn main() {
         let app = tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
             .setup(move |app| {
-                // Wait for server to start, then navigate to the correct URL
+                // Get a handle that can be used across threads
+                let app_handle = app.handle().clone();
                 let port = port_for_setup;
+                
+                // Spawn thread to navigate after server starts
                 thread::spawn(move || {
                     thread::sleep(Duration::from_secs(2));
                     
-                    if let Some(window) = app.get_webview_window("main") {
+                    if let Some(window) = app_handle.get_webview_window("main") {
                         let url = format!("http://127.0.0.1:{}", port);
                         println!("Navigating to: {}", url);
                         // Use eval to navigate to the new URL
