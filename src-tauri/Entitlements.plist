@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- App Sandbox is REQUIRED for App Store -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    
+    <!-- Network access for Azure Service Bus connections -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    
+    <!-- Allow local server (Next.js) to accept connections -->
+    <key>com.apple.security.network.server</key>
+    <true/>
+    
+    <!-- Allow reading/writing user-selected files (if needed) -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    
+    <!-- Allow reading/writing to Downloads folder (if needed) -->
+    <key>com.apple.security.files.downloads.read-write</key>
+    <true/>
+</dict>
+</plist>
+

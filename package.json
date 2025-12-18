@@ -10,7 +10,8 @@
     "lint": "eslint",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "tauri:build:appstore": "tauri build --bundles app-store --target universal-apple-darwin --config src-tauri/tauri.appstore.conf.json"
   },
   "dependencies": {
     "@azure/identity": "^4.13.0",

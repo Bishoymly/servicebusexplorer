@@ -1,5 +1,6 @@
 fn main() {
     // Copy Next.js standalone output to a location Tauri can bundle
+    // Only do this in release builds when the standalone directory exists
     #[cfg(not(debug_assertions))]
     {
         use std::fs;
@@ -19,12 +20,12 @@ fn main() {
                 }
                 if let Err(e) = copy_dir_all(standalone_dir, &target_resources) {
                     eprintln!("Warning: Failed to copy standalone directory: {}", e);
+                } else {
+                    println!("Successfully copied standalone directory to resources");
                 }
             }
-        } else {
-            eprintln!("Warning: Next.js standalone output not found at {:?}", standalone_dir);
-            eprintln!("Make sure 'npm run build' completed successfully before building Tauri app.");
         }
+        // Don't error if standalone doesn't exist - it's expected in dev builds
     }
     
     tauri_build::build()

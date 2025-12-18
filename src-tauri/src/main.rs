@@ -2,10 +2,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
+use tauri::Manager;
 
 // Find an available port starting from the preferred port
 fn find_available_port(start_port: u16) -> u16 {
@@ -25,13 +26,13 @@ fn start_nextjs_server(port: u16) -> Option<std::process::Child> {
     // On macOS: Contents/Resources inside .app bundle
     // On Windows/Linux: resources directory next to executable
     let exe = std::env::current_exe().expect("Failed to get executable path");
-    let mut app_dir = exe.parent().expect("Failed to get app directory");
+    let mut app_dir: PathBuf = exe.parent().expect("Failed to get app directory").to_path_buf();
     
     // On macOS, we might be in Contents/MacOS, so go up to Contents
     #[cfg(target_os = "macos")]
     {
         if app_dir.ends_with("MacOS") {
-            app_dir = app_dir.parent().unwrap();
+            app_dir = app_dir.parent().unwrap().to_path_buf();
         }
         // Then to Contents/Resources
         if app_dir.ends_with("Contents") {
@@ -108,7 +109,9 @@ fn main() {
                         let url = format!("http://127.0.0.1:{}", port);
                         println!("Navigating to: {}", url);
                         // Use eval to navigate to the new URL
-                        let _ = window.eval(&format!("window.location.href = '{}';", url));
+                        if let Err(e) = window.eval(&format!("window.location.href = '{}';", url)) {
+                            eprintln!("Failed to navigate to {}: {:?}", url, e);
+                        }
                     }
                 });
                 Ok(())
