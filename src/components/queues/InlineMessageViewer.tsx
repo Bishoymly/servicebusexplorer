@@ -160,7 +160,6 @@ export function InlineMessageViewer({ message, onResend }: InlineMessageViewerPr
                     fontSize: "0.875rem",
                     color: isDarkMode ? undefined : "hsl(var(--foreground))",
                   }}
-                  showLineNumbers
                   wrapLines
                   codeTagProps={{
                     style: {

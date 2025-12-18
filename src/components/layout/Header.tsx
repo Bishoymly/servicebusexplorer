@@ -4,19 +4,29 @@ import { useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useConnections } from "@/hooks/useConnections"
-import { CheckCircle2, XCircle } from "lucide-react"
+import { CheckCircle2, XCircle, Plus } from "lucide-react"
+import { ConnectionForm } from "@/components/connections/ConnectionForm"
+import type { ServiceBusConnection } from "@/types/azure"
 
 export function Header() {
   const pathname = usePathname()
   const router = useRouter()
-  const { connections, currentConnectionId, setCurrentConnectionId, currentConnection } = useConnections()
+  const { connections, currentConnectionId, setCurrentConnectionId, currentConnection, addConnection } = useConnections()
   const [mounted, setMounted] = useState(false)
+  const [formOpen, setFormOpen] = useState(false)
 
   useEffect(() => {
     setMounted(true)
   }, [])
 
   const handleConnectionChange = (newConnectionId: string) => {
+    // Special value for "New Connection"
+    if (newConnectionId === "__new__") {
+      setFormOpen(true)
+      // Reset select to current connection (this happens automatically via controlled value)
+      return
+    }
+    
     setCurrentConnectionId(newConnectionId)
     
     // If we're on a queues or topics page, redirect to the new connection's page
@@ -31,6 +41,17 @@ export function Header() {
         router.push(`/${encodedName}/topics`)
       }
     }
+  }
+
+  const handleFormSubmit = (data: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt">) => {
+    const newConnection: ServiceBusConnection = {
+      ...data,
+      id: crypto.randomUUID(),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    addConnection(newConnection)
+    setFormOpen(false)
   }
 
   return (
@@ -54,6 +75,12 @@ export function Header() {
                     </div>
                   </SelectItem>
                 ))}
+                <SelectItem value="__new__" className="text-primary">
+                  <div className="flex items-center gap-2">
+                    <Plus className="h-4 w-4" />
+                    New Connection
+                  </div>
+                </SelectItem>
               </SelectContent>
             </Select>
           ) : (
@@ -77,6 +104,12 @@ export function Header() {
           </div>
         )}
       </div>
+
+      <ConnectionForm
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        onSubmit={handleFormSubmit}
+      />
     </header>
   )
 }

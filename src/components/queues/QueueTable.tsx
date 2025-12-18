@@ -192,16 +192,14 @@ export function QueueTable({ queues, onQueueClick, onQueueClickDeadLetter, onEdi
                             <X className="h-4 w-4 mr-2" />
                             Purge Queue
                           </DropdownMenuItem>
-                          {queue.deadLetterMessageCount && queue.deadLetterMessageCount > 0 && (
-                            <DropdownMenuItem
-                              onClick={() => onPurge(queue.name, true)}
-                              disabled={purgingQueues?.has(queue.name)}
-                              className="text-destructive"
-                            >
-                              <X className="h-4 w-4 mr-2" />
-                              Purge Dead Letter
-                            </DropdownMenuItem>
-                          )}
+                          <DropdownMenuItem
+                            onClick={() => onPurge(queue.name, true)}
+                            disabled={purgingQueues?.has(queue.name)}
+                            className="text-destructive"
+                          >
+                            <X className="h-4 w-4 mr-2" />
+                            Purge Dead Letter
+                          </DropdownMenuItem>
                         </>
                       )}
                       <DropdownMenuItem
