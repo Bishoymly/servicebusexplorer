@@ -74,60 +74,90 @@ export function InlineMessageViewer({ message, onResend }: InlineMessageViewerPr
     return typeof message.body === "object"
   })()
   
-  // Get first 2 lines for preview
-  const getPreview = (text: string): string => {
+  // Get first 6 lines for preview (increased from 2)
+  const getPreview = (text: string, maxLines: number = 6): string => {
     const lines = text.split("\n")
-    return lines.slice(0, 2).join("\n") + (lines.length > 2 ? "..." : "")
+    if (lines.length <= maxLines) {
+      return text
+    }
+    return lines.slice(0, maxLines).join("\n") + "\n..."
   }
   
-  const preview = getPreview(bodyString)
+  const preview = getPreview(bodyString, 6)
   const language = isJSON ? "json" : message.contentType?.includes("json") ? "json" : "text"
   const syntaxTheme = isDarkMode ? vscDarkPlus : prism
+
+  const formatDate = (date: Date | undefined): string => {
+    if (!date) return "-"
+    const d = new Date(date)
+    return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
 
   return (
     <div className="border rounded-lg overflow-hidden">
       {/* Preview Header */}
       <div
-        className="px-4 py-3 bg-muted/50 hover:bg-muted/70 cursor-pointer transition-colors"
+        className="group px-3 py-2 bg-muted/50 hover:bg-muted/70 cursor-pointer transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center justify-between">
+        <div className="flex items-start gap-3">
+          {/* Main Content - Body Preview */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <span className="text-xs font-mono text-muted-foreground">
-                {message.messageId || "No ID"}
-              </span>
-              {message.subject && (
-                <>
-                  <span className="text-muted-foreground">•</span>
-                  <span className="text-sm font-medium truncate">{message.subject}</span>
-                </>
-              )}
-              {message.sequenceNumber !== undefined && (
-                <>
-                  <span className="text-muted-foreground">•</span>
-                  <span className="text-xs text-muted-foreground">
-                    Seq: <span className="font-mono">{message.sequenceNumber}</span>
-                  </span>
-                </>
-              )}
-              {message.enqueuedTimeUtc && (
-                <>
-                  <span className="text-muted-foreground">•</span>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(message.enqueuedTimeUtc).toLocaleString()}
-                  </span>
-                </>
-              )}
-            </div>
-            <div className="text-sm font-mono text-muted-foreground whitespace-pre-wrap break-words">
+            <div className="text-[11px] font-mono text-foreground whitespace-pre-wrap break-words leading-relaxed">
               {preview}
             </div>
           </div>
+
+          {/* Side Attributes */}
+          <div 
+            className="flex-shrink-0 w-56 flex flex-col gap-1 text-[10px] text-muted-foreground"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {message.messageId && (
+              <div className="flex items-start gap-1">
+                <span className="font-medium text-[9px] uppercase tracking-wide">ID:</span>
+                <span className="font-mono break-all">{message.messageId}</span>
+              </div>
+            )}
+            {message.correlationId && (
+              <div className="flex items-start gap-1">
+                <span className="font-medium text-[9px] uppercase tracking-wide">Corr:</span>
+                <span className="font-mono break-all">{message.correlationId}</span>
+              </div>
+            )}
+            {message.subject && (
+              <div className="flex items-start gap-1">
+                <span className="font-medium text-[9px] uppercase tracking-wide">Subj:</span>
+                <span className="break-all">{message.subject}</span>
+              </div>
+            )}
+            {message.sequenceNumber !== undefined && (
+              <div className="flex items-start gap-1">
+                <span className="font-medium text-[9px] uppercase tracking-wide">Seq:</span>
+                <span className="font-mono">{message.sequenceNumber}</span>
+              </div>
+            )}
+            <div className="flex items-center gap-3 mt-1 pt-1 border-t border-border/50">
+              {message.deliveryCount !== undefined && (
+                <div className="flex items-center gap-1">
+                  <span className="font-medium text-[9px] uppercase">Del:</span>
+                  <span>{message.deliveryCount}</span>
+                </div>
+              )}
+              {message.enqueuedTimeUtc && (
+                <div className="flex items-center gap-1">
+                  <span className="font-medium text-[9px] uppercase">Time:</span>
+                  <span className="font-mono">{formatDate(message.enqueuedTimeUtc)}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Expand/Collapse Button */}
           <Button
             variant="ghost"
             size="icon"
-            className="h-6 w-6 ml-2 flex-shrink-0"
+            className="h-6 w-6 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
             onClick={(e) => {
               e.stopPropagation()
               setExpanded(!expanded)

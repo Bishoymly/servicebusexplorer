@@ -214,7 +214,7 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
       )}
 
       {/* Messages List */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+      <div className="flex-1 overflow-y-auto p-3 space-y-1">
         {loading && messages.length === 0 ? (
           <div className="flex items-center justify-center py-12">
             <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
