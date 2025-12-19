@@ -193,7 +193,10 @@ export function Tree({ nodes, expanded, onToggle, onSelect, onBadgeClick, select
     })
   })
 
-  const filteredNodes = searchTerm ? filterTree(nodes, searchTerm) : nodes
+  // Memoize filteredNodes to prevent unnecessary recalculations
+  const filteredNodes = React.useMemo(() => {
+    return searchTerm ? filterTree(nodes, searchTerm) : nodes
+  }, [nodes, searchTerm])
 
   // Auto-expand nodes that match search
   React.useEffect(() => {
@@ -213,8 +216,15 @@ export function Tree({ nodes, expanded, onToggle, onSelect, onBadgeClick, select
       const idsToExpand = expandIds(filteredNodes)
       setInternalExpanded(prev => {
         const next = new Set(prev)
-        idsToExpand.forEach(id => next.add(id))
-        return next
+        let hasChanges = false
+        idsToExpand.forEach(id => {
+          if (!next.has(id)) {
+            next.add(id)
+            hasChanges = true
+          }
+        })
+        // Only update state if there are actual changes
+        return hasChanges ? next : prev
       })
     }
   }, [searchTerm, filteredNodes])

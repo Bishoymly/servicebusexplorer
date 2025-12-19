@@ -52,13 +52,23 @@ export function useMessages(connectionOverride?: ServiceBusConnection | null) {
   )
 
   const peekDeadLetterMessages = useCallback(
-    async (queueName: string, maxCount: number = 10): Promise<ServiceBusMessage[]> => {
+    async (
+      queueNameOrTopicName: string,
+      subscriptionName?: string,
+      maxCount: number = 10
+    ): Promise<ServiceBusMessage[]> => {
       if (!connection) return []
 
       setLoading(true)
       setError(null)
       try {
-        return await apiClient.peekDeadLetterMessages(connection, queueName, maxCount)
+        // If subscriptionName is provided, treat first param as topicName
+        if (subscriptionName) {
+          return await apiClient.peekDeadLetterMessages(connection, undefined, queueNameOrTopicName, subscriptionName, maxCount)
+        } else {
+          // Otherwise treat as queueName
+          return await apiClient.peekDeadLetterMessages(connection, queueNameOrTopicName, undefined, undefined, maxCount)
+        }
       } catch (err: any) {
         setError(err.message || "Failed to peek dead letter messages")
         return []

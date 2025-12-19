@@ -166,6 +166,23 @@ class ApiClient {
     return data.subscriptions
   }
 
+  async createSubscription(
+    connection: ServiceBusConnection | null,
+    topicName: string,
+    subscriptionName: string,
+    properties?: Partial<SubscriptionProperties>
+  ): Promise<void> {
+    const response = await fetch(`/api/topics/${encodeURIComponent(topicName)}/subscriptions/create`, {
+      method: "POST",
+      headers: this.getConnectionHeader(connection),
+      body: JSON.stringify({ subscriptionName, properties }),
+    })
+    if (!response.ok) {
+      const error = await response.json()
+      throw new Error(error.error || "Failed to create subscription")
+    }
+  }
+
   async peekMessages(
     connection: ServiceBusConnection | null,
     queueName?: string,
@@ -188,13 +205,15 @@ class ApiClient {
 
   async peekDeadLetterMessages(
     connection: ServiceBusConnection | null,
-    queueName: string,
+    queueName?: string,
+    topicName?: string,
+    subscriptionName?: string,
     maxCount: number = 10
   ): Promise<ServiceBusMessage[]> {
     const response = await fetch("/api/messages/deadletter", {
       method: "POST",
       headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ queueName, maxCount }),
+      body: JSON.stringify({ queueName, topicName, subscriptionName, maxCount }),
     })
     if (!response.ok) {
       const error = await response.json()

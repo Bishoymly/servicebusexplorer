@@ -1,12 +1,13 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { RefreshCw, Trash2, Send, X } from "lucide-react"
+import { RefreshCw, Trash2, Send, X, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { InlineMessageViewer } from "./InlineMessageViewer"
 import { MessageEditor } from "@/components/messages/MessageEditor"
+import { QueueSettingsForm } from "./QueueSettingsForm"
 import { useMessages } from "@/hooks/useMessages"
 import { useQueues } from "@/hooks/useQueues"
 import type { ServiceBusMessage, ServiceBusConnection, QueueProperties } from "@/types/azure"
@@ -19,9 +20,11 @@ interface QueueMessagesPanelProps {
   connection: ServiceBusConnection
   initialShowDeadLetter?: boolean
   onClose?: () => void
+  onQueueDeleted?: () => void
+  onQueueUpdated?: () => void
 }
 
-export function QueueMessagesPanel({ queueName, connection, initialShowDeadLetter = false, onClose }: QueueMessagesPanelProps) {
+export function QueueMessagesPanel({ queueName, connection, initialShowDeadLetter = false, onClose, onQueueDeleted, onQueueUpdated }: QueueMessagesPanelProps) {
   const { peekMessages, peekDeadLetterMessages, loading, error } = useMessages(connection)
   const { purgeQueue, refreshQueue, getQueue } = useQueues(connection)
   const [messages, setMessages] = useState<ServiceBusMessage[]>([])
@@ -29,6 +32,7 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
   const [activeTab, setActiveTab] = useState<"active" | "deadletter">(initialShowDeadLetter ? "deadletter" : "active")
   const [purging, setPurging] = useState(false)
   const [showSendDialog, setShowSendDialog] = useState(false)
+  const [showEditDialog, setShowEditDialog] = useState(false)
   const [queueProperties, setQueueProperties] = useState<QueueProperties | null>(null)
 
   // Update activeTab when initialShowDeadLetter prop changes
@@ -45,7 +49,7 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
     setMessages([])
     try {
       if (activeTab === "deadletter") {
-        const msgs = await peekDeadLetterMessages(queueName, maxCount)
+        const msgs = await peekDeadLetterMessages(queueName, undefined, maxCount)
         setMessages(msgs)
       } else {
         // Active messages - peek regular messages
@@ -125,6 +129,30 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
     }
   }
 
+  const handleEditSuccess = async () => {
+    // Reload queue properties after editing
+    const queue = await getQueue(queueName)
+    if (queue) {
+      setQueueProperties(queue)
+    }
+    setShowEditDialog(false)
+    // Refresh tree view
+    if (onQueueUpdated) {
+      onQueueUpdated()
+    }
+  }
+
+  const handleQueueDeleted = () => {
+    // Close the panel when queue is deleted
+    if (onClose) {
+      onClose()
+    }
+    // Refresh tree view
+    if (onQueueDeleted) {
+      onQueueDeleted()
+    }
+  }
+
   return (
     <div className="h-full flex flex-col bg-background">
       {/* Header */}
@@ -165,6 +193,15 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
           </Tabs>
 
           <div className="flex items-center gap-2 ml-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowEditDialog(true)}
+              disabled={!queueProperties}
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Edit Queue
+            </Button>
             {activeTab === "active" && (
               <Button
                 variant="default"
@@ -214,7 +251,7 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
       )}
 
       {/* Messages List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-1">
+      <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {loading && messages.length === 0 ? (
           <div className="flex items-center justify-center py-12">
             <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -243,6 +280,18 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
         connection={connection}
         onSuccess={handleSendSuccess}
       />
+
+      {/* Edit Queue Dialog */}
+      {queueProperties && (
+        <QueueSettingsForm
+          queue={queueProperties}
+          connection={connection}
+          open={showEditDialog}
+          onOpenChange={setShowEditDialog}
+          onSuccess={handleEditSuccess}
+          onDelete={handleQueueDeleted}
+        />
+      )}
     </div>
   )
 }

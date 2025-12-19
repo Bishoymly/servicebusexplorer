@@ -302,6 +302,21 @@ export class ServiceBusExplorerClient {
     }
   }
 
+  async createSubscription(
+    topicName: string,
+    subscriptionName: string,
+    properties?: Partial<SubscriptionProperties>
+  ): Promise<void> {
+    await this.adminClient.createSubscription(topicName, subscriptionName, {
+      maxDeliveryCount: properties?.maxDeliveryCount,
+      lockDuration: properties?.lockDurationInSeconds ? this.secondsToDuration(properties.lockDurationInSeconds) : undefined,
+      defaultMessageTimeToLive: properties?.defaultMessageTimeToLiveInSeconds ? this.secondsToDuration(properties.defaultMessageTimeToLiveInSeconds) : undefined,
+      deadLetteringOnMessageExpiration: properties?.deadLetteringOnMessageExpiration,
+      enableBatchedOperations: properties?.enableBatchedOperations,
+      requiresSession: properties?.requiresSession,
+    })
+  }
+
   // Message operations
   async peekMessages(queueName: string, maxCount: number = 10): Promise<ServiceBusMessage[]> {
     const receiver = this.sbClient.createReceiver(queueName, { receiveMode: "peekLock" })
@@ -359,8 +374,21 @@ export class ServiceBusExplorerClient {
     }
   }
 
-  async peekDeadLetterMessages(queueName: string, maxCount: number = 10): Promise<ServiceBusMessage[]> {
-    const receiver = this.sbClient.createReceiver(queueName, { subQueueType: "deadLetter", receiveMode: "peekLock" })
+  async peekDeadLetterMessages(
+    queueName?: string,
+    topicName?: string,
+    subscriptionName?: string,
+    maxCount: number = 10
+  ): Promise<ServiceBusMessage[]> {
+    let receiver
+    if (queueName) {
+      receiver = this.sbClient.createReceiver(queueName, { subQueueType: "deadLetter", receiveMode: "peekLock" })
+    } else if (topicName && subscriptionName) {
+      receiver = this.sbClient.createReceiver(topicName, subscriptionName, { subQueueType: "deadLetter", receiveMode: "peekLock" })
+    } else {
+      throw new Error("Either queueName or (topicName and subscriptionName) must be provided")
+    }
+    
     try {
       const messages = await receiver.peekMessages(maxCount)
       return messages.map((msg) => ({

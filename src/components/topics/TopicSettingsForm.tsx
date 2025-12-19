@@ -16,6 +16,7 @@ import type { TopicProperties } from "@/types/azure"
 
 interface TopicSettingsFormProps {
   topic?: TopicProperties
+  connection?: ServiceBusConnection
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess: () => void
@@ -23,11 +24,12 @@ interface TopicSettingsFormProps {
 
 export function TopicSettingsForm({
   topic,
+  connection,
   open,
   onOpenChange,
   onSuccess,
 }: TopicSettingsFormProps) {
-  const { createTopic, updateTopic } = useTopics()
+  const { createTopic, updateTopic } = useTopics(connection)
   const [name, setName] = useState("")
   const [maxSizeInMegabytes, setMaxSizeInMegabytes] = useState<number | undefined>()
   const [defaultMessageTimeToLiveInSeconds, setDefaultMessageTimeToLiveInSeconds] = useState<

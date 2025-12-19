@@ -10,24 +10,30 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog"
 import { useQueues } from "@/hooks/useQueues"
-import type { QueueProperties } from "@/types/azure"
+import type { QueueProperties, ServiceBusConnection } from "@/types/azure"
+import { Trash2 } from "lucide-react"
 
 interface QueueSettingsFormProps {
   queue?: QueueProperties
+  connection?: ServiceBusConnection
   open: boolean
   onOpenChange: (open: boolean) => void
   onSuccess: () => void
+  onDelete?: () => void
 }
 
 export function QueueSettingsForm({
   queue,
+  connection,
   open,
   onOpenChange,
   onSuccess,
+  onDelete,
 }: QueueSettingsFormProps) {
-  const { createQueue, updateQueue } = useQueues()
+  const { createQueue, updateQueue, deleteQueue } = useQueues(connection)
   const [name, setName] = useState("")
   const [maxSizeInMegabytes, setMaxSizeInMegabytes] = useState<number | undefined>()
   const [lockDurationInSeconds, setLockDurationInSeconds] = useState<number | undefined>()
@@ -43,6 +49,8 @@ export function QueueSettingsForm({
   const [requiresSession, setRequiresSession] = useState(false)
   const [requiresDuplicateDetection, setRequiresDuplicateDetection] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (queue) {
@@ -105,6 +113,27 @@ export function QueueSettingsForm({
       console.error("Failed to save queue:", error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!queue) return
+
+    setDeleting(true)
+    try {
+      await deleteQueue(queue.name)
+      setDeleteDialogOpen(false)
+      onOpenChange(false)
+      // Call onDelete callback first (to refresh tree and close panel)
+      if (onDelete) {
+        onDelete()
+      }
+      // Then call onSuccess for any other cleanup
+      onSuccess()
+    } catch (error) {
+      console.error("Failed to delete queue:", error)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -253,15 +282,55 @@ export function QueueSettingsForm({
             </div>
           </div>
           <DialogFooter>
+            {queue && (
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => setDeleteDialogOpen(true)}
+                disabled={loading || deleting}
+                className="mr-auto"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete Queue
+              </Button>
+            )}
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={loading}>
+            <Button type="submit" disabled={loading || deleting}>
               {loading ? "Saving..." : queue ? "Update" : "Create"}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Delete Queue</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete the queue &quot;{queue?.name}&quot;? This action cannot be undone and all messages in the queue will be lost.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }

@@ -6,7 +6,7 @@ import { useConnections } from "./useConnections"
 import { apiClient } from "@/lib/api/client"
 import type { TreeNode } from "@/components/ui/tree"
 import type { QueueProperties, TopicProperties, SubscriptionProperties, QueueSortOption, TopicSortOption, SubscriptionSortOption } from "@/types/azure"
-import { Database, MessageSquare, FolderTree, Mail, RefreshCw, ArrowUpDown, Trash2 } from "lucide-react"
+import { Database, MessageSquare, FolderTree, Mail, RefreshCw, ArrowUpDown, Trash2, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -31,7 +31,13 @@ interface ConnectionTreeData {
   subscriptions: Record<string, SubscriptionProperties[]>
 }
 
-export function useTreeData(onConnectionRemoved?: (connectionId: string) => void, onDeleteRequest?: (connectionId: string, connectionName: string) => void) {
+export function useTreeData(
+  onConnectionRemoved?: (connectionId: string) => void,
+  onDeleteRequest?: (connectionId: string, connectionName: string) => void,
+  onCreateQueue?: (connectionId: string) => void,
+  onCreateTopic?: (connectionId: string) => void,
+  onCreateSubscription?: (connectionId: string, topicName: string) => void
+) {
   const { connections, currentConnectionId, removeConnection } = useConnections()
   const [connectionData, setConnectionData] = useState<Record<string, ConnectionTreeData>>({})
   const [loading, setLoading] = useState<Record<string, boolean>>({})
@@ -330,11 +336,28 @@ export function useTreeData(onConnectionRemoved?: (connectionId: string) => void
           }
         })
 
+        const topicCreateSubscriptionAction = React.createElement(
+          Button,
+          {
+            variant: "ghost",
+            size: "sm",
+            className: "h-5 w-5 p-0 opacity-0 group-hover:opacity-100",
+            onClick: (e: React.MouseEvent) => {
+              e.stopPropagation()
+              if (onCreateSubscription) {
+                onCreateSubscription(connection.id, topic.name)
+              }
+            },
+          },
+          React.createElement(Plus, { className: "h-3 w-3" })
+        )
+
         return {
           id: `topic-${connection.id}-${topic.name}`,
           label: topic.name,
           icon: React.createElement(FolderTree, { className: "h-3 w-3" }),
           children: subscriptionNodes.length > 0 ? subscriptionNodes : undefined,
+          actions: topicCreateSubscriptionAction,
           data: { type: "topic", connection, topic },
         }
       })
@@ -397,13 +420,29 @@ export function useTreeData(onConnectionRemoved?: (connectionId: string) => void
           },
           React.createElement(RefreshCw, { className: cn("h-3 w-3", loading[connection.id] && "animate-spin") })
         )
+
+        const queueCreateAction = React.createElement(
+          Button,
+          {
+            variant: "ghost",
+            size: "sm",
+            className: "h-5 w-5 p-0 opacity-0 group-hover:opacity-100",
+            onClick: (e: React.MouseEvent) => {
+              e.stopPropagation()
+              if (onCreateQueue) {
+                onCreateQueue(connection.id)
+              }
+            },
+          },
+          React.createElement(Plus, { className: "h-3 w-3" })
+        )
         
         children.push({
           id: `queues-${connection.id}`,
           label: "Queues",
           icon: React.createElement(MessageSquare, { className: "h-3 w-3" }),
           children: queueNodes,
-          actions: queueSortAction,
+          actions: React.createElement("div", { className: "flex items-center gap-1" }, queueSortAction, queueCreateAction),
           refreshAction: queueRefreshAction,
           data: { type: "queues-header", connection },
           isLoading: loading[connection.id],
@@ -461,13 +500,29 @@ export function useTreeData(onConnectionRemoved?: (connectionId: string) => void
           },
           React.createElement(RefreshCw, { className: cn("h-3 w-3", loading[connection.id] && "animate-spin") })
         )
+
+        const topicCreateAction = React.createElement(
+          Button,
+          {
+            variant: "ghost",
+            size: "sm",
+            className: "h-5 w-5 p-0 opacity-0 group-hover:opacity-100",
+            onClick: (e: React.MouseEvent) => {
+              e.stopPropagation()
+              if (onCreateTopic) {
+                onCreateTopic(connection.id)
+              }
+            },
+          },
+          React.createElement(Plus, { className: "h-3 w-3" })
+        )
         
         children.push({
           id: `topics-${connection.id}`,
           label: "Topics",
           icon: React.createElement(FolderTree, { className: "h-3 w-3" }),
           children: topicNodes,
-          actions: topicSortAction,
+          actions: React.createElement("div", { className: "flex items-center gap-1" }, topicSortAction, topicCreateAction),
           refreshAction: topicRefreshAction,
           data: { type: "topics-header", connection },
           isLoading: loading[connection.id],
@@ -527,7 +582,7 @@ export function useTreeData(onConnectionRemoved?: (connectionId: string) => void
         isLoading: loading[connection.id],
       }
     })
-  }, [connections, connectionData, currentConnectionId, sortPreferences, handleRefreshQueues, handleRefreshTopics, handleSortChange, removeConnection, refreshConnection, loading, onConnectionRemoved, onDeleteRequest])
+  }, [connections, connectionData, currentConnectionId, sortPreferences, handleRefreshQueues, handleRefreshTopics, handleSortChange, removeConnection, refreshConnection, loading, onConnectionRemoved, onDeleteRequest, onCreateQueue, onCreateTopic, onCreateSubscription])
 
   const treeNodes = React.useMemo(() => buildTreeNodes(), [buildTreeNodes])
 

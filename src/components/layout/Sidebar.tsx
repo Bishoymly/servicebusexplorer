@@ -9,8 +9,12 @@ import { Tree, type TreeNode } from "@/components/ui/tree"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ConnectionForm } from "@/components/connections/ConnectionForm"
+import { QueueSettingsForm } from "@/components/queues/QueueSettingsForm"
+import { TopicSettingsForm } from "@/components/topics/TopicSettingsForm"
+import { SubscriptionSettingsForm } from "@/components/topics/SubscriptionSettingsForm"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { useSelectedResource } from "@/contexts/SelectedResourceContext"
+import { TreeRefreshProvider } from "@/contexts/TreeRefreshContext"
 import type { ServiceBusConnection } from "@/types/azure"
 
 export function Sidebar() {
@@ -42,7 +46,29 @@ export function Sidebar() {
     }
   }
   
-  const { treeNodes } = useTreeData(handleConnectionRemoved, handleDeleteRequest)
+  const [createQueueDialog, setCreateQueueDialog] = useState<{ connectionId: string } | null>(null)
+  const [createTopicDialog, setCreateTopicDialog] = useState<{ connectionId: string } | null>(null)
+  const [createSubscriptionDialog, setCreateSubscriptionDialog] = useState<{ connectionId: string; topicName: string } | null>(null)
+
+  const handleCreateQueue = (connectionId: string) => {
+    setCreateQueueDialog({ connectionId })
+  }
+
+  const handleCreateTopic = (connectionId: string) => {
+    setCreateTopicDialog({ connectionId })
+  }
+
+  const handleCreateSubscription = (connectionId: string, topicName: string) => {
+    setCreateSubscriptionDialog({ connectionId, topicName })
+  }
+
+  const { treeNodes, refreshConnection } = useTreeData(
+    handleConnectionRemoved,
+    handleDeleteRequest,
+    handleCreateQueue,
+    handleCreateTopic,
+    handleCreateSubscription
+  )
   const [searchTerm, setSearchTerm] = useState("")
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [formOpen, setFormOpen] = useState(false)
@@ -61,12 +87,19 @@ export function Sidebar() {
       })
       // Navigate to home page
       router.push("/")
-    } else if (type === "topic" && connection && topic) {
-      const encodedName = encodeURIComponent(connection.name)
-      router.push(`/${encodedName}/topics`)
     } else if (type === "subscription" && connection && topic && subscription) {
-      const encodedName = encodeURIComponent(connection.name)
-      router.push(`/${encodedName}/topics`)
+      // Set selected resource for subscription (similar to queue)
+      setSelectedResource({
+        type: "subscription",
+        name: subscription.subscriptionName,
+        connectionId: connection.id,
+        connectionName: connection.name,
+        topicName: topic.name,
+        subscriptionName: subscription.subscriptionName,
+        showDeadLetter: false,
+      })
+      // Navigate to home page
+      router.push("/")
     } else if (type === "connection" && connection) {
       // Toggle expansion for connection
       setExpanded(prev => {
@@ -93,7 +126,7 @@ export function Sidebar() {
   }
 
   const handleBadgeClick = (node: TreeNode, badgeType: string) => {
-    const { type, connection, queue, subscription } = node.data || {}
+    const { type, connection, queue, topic, subscription } = node.data || {}
     
     // Handle dead letter badge click
     if (badgeType === "deadletter" && type === "queue" && connection && queue) {
@@ -105,9 +138,17 @@ export function Sidebar() {
         showDeadLetter: true,
       })
       router.push("/")
-    } else if (badgeType === "deadletter" && type === "subscription" && connection && subscription) {
-      // Handle subscription dead letter click if needed in the future
-      // For now, subscriptions don't have a separate dead letter view
+    } else if (badgeType === "deadletter" && type === "subscription" && connection && topic && subscription) {
+      setSelectedResource({
+        type: "subscription",
+        name: subscription.subscriptionName,
+        connectionId: connection.id,
+        connectionName: connection.name,
+        topicName: topic.name,
+        subscriptionName: subscription.subscriptionName,
+        showDeadLetter: true,
+      })
+      router.push("/")
     }
   }
 
@@ -171,7 +212,8 @@ export function Sidebar() {
   }
 
   return (
-    <div className="flex h-full w-96 flex-col border-r bg-card">
+    <TreeRefreshProvider refreshConnection={refreshConnection}>
+      <div className="flex h-full w-96 flex-col border-r bg-card">
       <div className="flex h-16 items-center border-b px-4">
         <h1 className="text-lg font-semibold">Service Bus Explorer</h1>
       </div>
@@ -262,7 +304,66 @@ export function Sidebar() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+
+      {/* Create Queue Dialog */}
+      {createQueueDialog && (() => {
+        const connection = connections.find(c => c.id === createQueueDialog.connectionId)
+        if (!connection) return null
+        return (
+          <QueueSettingsForm
+            connection={connection}
+            open={!!createQueueDialog}
+            onOpenChange={(open) => {
+              if (!open) setCreateQueueDialog(null)
+            }}
+            onSuccess={async () => {
+              setCreateQueueDialog(null)
+              await refreshConnection(createQueueDialog.connectionId)
+            }}
+          />
+        )
+      })()}
+
+      {/* Create Topic Dialog */}
+      {createTopicDialog && (() => {
+        const connection = connections.find(c => c.id === createTopicDialog.connectionId)
+        if (!connection) return null
+        return (
+          <TopicSettingsForm
+            connection={connection}
+            open={!!createTopicDialog}
+            onOpenChange={(open) => {
+              if (!open) setCreateTopicDialog(null)
+            }}
+            onSuccess={async () => {
+              setCreateTopicDialog(null)
+              await refreshConnection(createTopicDialog.connectionId)
+            }}
+          />
+        )
+      })()}
+
+      {/* Create Subscription Dialog */}
+      {createSubscriptionDialog && (() => {
+        const connection = connections.find(c => c.id === createSubscriptionDialog.connectionId)
+        if (!connection) return null
+        return (
+          <SubscriptionSettingsForm
+            topicName={createSubscriptionDialog.topicName}
+            connection={connection}
+            open={!!createSubscriptionDialog}
+            onOpenChange={(open) => {
+              if (!open) setCreateSubscriptionDialog(null)
+            }}
+            onSuccess={async () => {
+              setCreateSubscriptionDialog(null)
+              await refreshConnection(createSubscriptionDialog.connectionId)
+            }}
+          />
+        )
+      })()}
+      </div>
+    </TreeRefreshProvider>
   )
 }
 

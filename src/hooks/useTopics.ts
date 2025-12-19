@@ -5,14 +5,15 @@ import type { TopicProperties, SubscriptionProperties } from "@/types/azure"
 import { apiClient } from "@/lib/api/client"
 import { useConnections } from "./useConnections"
 
-export function useTopics() {
+export function useTopics(connectionOverride?: ServiceBusConnection | null) {
   const { currentConnection, currentConnectionId, loading: connectionsLoading } = useConnections()
+  const connection = connectionOverride ?? currentConnection
   const [topics, setTopics] = useState<TopicProperties[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const loadTopics = useCallback(async () => {
-    if (!currentConnection) {
+    if (!connection) {
       setTopics([])
       return
     }
@@ -23,60 +24,60 @@ export function useTopics() {
     
     try {
       // Topics are loaded with names first, then counts updated progressively
-      const loadedTopics = await apiClient.listTopics(currentConnection)
+      const loadedTopics = await apiClient.listTopics(connection)
       setTopics(loadedTopics)
     } catch (err: any) {
       setError(err.message || "Failed to load topics")
     } finally {
       setLoading(false)
     }
-  }, [currentConnection])
+  }, [connection])
 
   useEffect(() => {
     // Wait for connections to finish loading before trying to load topics
-    if (connectionsLoading) {
+    if (connectionsLoading && !connectionOverride) {
       return
     }
     
-    if (currentConnection && currentConnectionId) {
+    if (connection) {
       loadTopics()
     } else {
       setTopics([])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentConnectionId, currentConnection, connectionsLoading]) // Depend on both ID and connection object
+  }, [connection, connectionsLoading, connectionOverride]) // Depend on connection object
 
   const getTopic = useCallback(
     async (topicName: string): Promise<TopicProperties | null> => {
-      if (!currentConnection) return null
+      if (!connection) return null
       try {
-        return await apiClient.getTopic(currentConnection, topicName)
+        return await apiClient.getTopic(connection, topicName)
       } catch (err: any) {
         setError(err.message || "Failed to get topic properties")
         return null
       }
     },
-    [currentConnection]
+    [connection]
   )
 
   const listSubscriptions = useCallback(
     async (topicName: string): Promise<SubscriptionProperties[]> => {
-      if (!currentConnection) return []
+      if (!connection) return []
       try {
-        return await apiClient.listSubscriptions(currentConnection, topicName)
+        return await apiClient.listSubscriptions(connection, topicName)
       } catch (err: any) {
         setError(err.message || "Failed to list subscriptions")
         return []
       }
     },
-    [currentConnection]
+    [connection]
   )
 
   const updateTopic = useCallback(
     async (topicName: string, properties: Partial<TopicProperties>): Promise<boolean> => {
-      if (!currentConnection) return false
+      if (!connection) return false
       try {
-        await apiClient.updateTopic(currentConnection, topicName, properties)
+        await apiClient.updateTopic(connection, topicName, properties)
         await loadTopics()
         return true
       } catch (err: any) {
@@ -84,14 +85,14 @@ export function useTopics() {
         return false
       }
     },
-    [currentConnection, loadTopics]
+    [connection, loadTopics]
   )
 
   const createTopic = useCallback(
     async (topicName: string, properties?: Partial<TopicProperties>): Promise<boolean> => {
-      if (!currentConnection) return false
+      if (!connection) return false
       try {
-        await apiClient.createTopic(currentConnection, topicName, properties)
+        await apiClient.createTopic(connection, topicName, properties)
         await loadTopics()
         return true
       } catch (err: any) {
@@ -99,14 +100,14 @@ export function useTopics() {
         return false
       }
     },
-    [currentConnection, loadTopics]
+    [connection, loadTopics]
   )
 
   const deleteTopic = useCallback(
     async (topicName: string): Promise<boolean> => {
-      if (!currentConnection) return false
+      if (!connection) return false
       try {
-        await apiClient.deleteTopic(currentConnection, topicName)
+        await apiClient.deleteTopic(connection, topicName)
         await loadTopics()
         return true
       } catch (err: any) {
@@ -114,7 +115,7 @@ export function useTopics() {
         return false
       }
     },
-    [currentConnection, loadTopics]
+    [connection, loadTopics]
   )
 
   return {

@@ -11,9 +11,14 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useMessages } from "@/hooks/useMessages"
 import type { ServiceBusMessage, ServiceBusConnection } from "@/types/azure"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter"
+import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism"
+import coy from "react-syntax-highlighter/dist/cjs/styles/prism/coy"
+import { Send } from "lucide-react"
 
 interface MessageEditorProps {
   open: boolean
@@ -36,7 +41,7 @@ export function MessageEditor({
 }: MessageEditorProps) {
   const { sendMessage, sendMessageToTopic, loading } = useMessages(connection)
   const [body, setBody] = useState("")
-  const [bodyFormat, setBodyFormat] = useState<"text" | "json">("text")
+  const [bodyFormat, setBodyFormat] = useState<"text" | "json">("json")
   const [messageId, setMessageId] = useState("")
   const [contentType, setContentType] = useState("application/json")
   const [correlationId, setCorrelationId] = useState("")
@@ -45,6 +50,7 @@ export function MessageEditor({
   const [customProperties, setCustomProperties] = useState<Record<string, string>>({})
   const [newPropertyKey, setNewPropertyKey] = useState("")
   const [newPropertyValue, setNewPropertyValue] = useState("")
+  const [isDarkMode, setIsDarkMode] = useState(false)
 
   useEffect(() => {
     if (initialMessage) {
@@ -71,6 +77,30 @@ export function MessageEditor({
       setCustomProperties({})
     }
   }, [initialMessage, open])
+
+  useEffect(() => {
+    const checkTheme = () => {
+      if (typeof window !== "undefined") {
+        const isDark =
+          document.documentElement.classList.contains("dark") ||
+          window.matchMedia("(prefers-color-scheme: dark)").matches
+        setIsDarkMode(isDark)
+      }
+    }
+    checkTheme()
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)")
+    const handleChange = () => checkTheme()
+    mediaQuery.addEventListener("change", handleChange)
+    const observer = new MutationObserver(checkTheme)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    })
+    return () => {
+      mediaQuery.removeEventListener("change", handleChange)
+      observer.disconnect()
+    }
+  }, [])
 
   const handleAddProperty = () => {
     if (newPropertyKey && newPropertyValue) {
@@ -124,6 +154,7 @@ export function MessageEditor({
       onOpenChange(false)
     } catch (error) {
       console.error("Failed to send message:", error)
+      alert(`Failed to send message: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
 
@@ -135,107 +166,144 @@ export function MessageEditor({
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="messageId">Message ID (optional)</Label>
-                <Input
-                  id="messageId"
-                  value={messageId}
-                  onChange={(e) => setMessageId(e.target.value)}
-                  placeholder="Auto-generated if empty"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="contentType">Content Type</Label>
-                <Input
-                  id="contentType"
-                  value={contentType}
-                  onChange={(e) => setContentType(e.target.value)}
-                  placeholder="application/json"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="correlationId">Correlation ID (optional)</Label>
-                <Input
-                  id="correlationId"
-                  value={correlationId}
-                  onChange={(e) => setCorrelationId(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="sessionId">Session ID (optional)</Label>
-                <Input
-                  id="sessionId"
-                  value={sessionId}
-                  onChange={(e) => setSessionId(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2 col-span-2">
-                <Label htmlFor="subject">Subject (optional)</Label>
-                <Input
-                  id="subject"
-                  value={subject}
-                  onChange={(e) => setSubject(e.target.value)}
-                />
-              </div>
-            </div>
-
+            {/* Message Body - Main Content */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="body">Message Body</Label>
-                <Tabs value={bodyFormat} onValueChange={(v) => setBodyFormat(v as "text" | "json")}>
-                  <TabsList>
-                    <TabsTrigger value="text">Text</TabsTrigger>
-                    <TabsTrigger value="json">JSON</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </div>
-              <textarea
-                id="body"
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                className="w-full min-h-[200px] rounded-md border border-input bg-background px-3 py-2 text-sm font-mono"
-                placeholder={bodyFormat === "json" ? '{"key": "value"}' : "Enter message body"}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label>Custom Properties</Label>
-              <div className="space-y-2">
-                {Object.entries(customProperties).map(([key, value]) => (
-                  <div key={key} className="flex items-center gap-2">
-                    <Input value={key} disabled className="flex-1" />
-                    <Input value={value} disabled className="flex-1" />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleRemoveProperty(key)}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                ))}
                 <div className="flex items-center gap-2">
-                  <Input
-                    placeholder="Property key"
-                    value={newPropertyKey}
-                    onChange={(e) => setNewPropertyKey(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Input
-                    placeholder="Property value"
-                    value={newPropertyValue}
-                    onChange={(e) => setNewPropertyValue(e.target.value)}
-                    className="flex-1"
-                  />
-                  <Button type="button" variant="outline" onClick={handleAddProperty}>
-                    Add
-                  </Button>
+                  <Tabs value={bodyFormat} onValueChange={(v) => setBodyFormat(v as "text" | "json")}>
+                    <TabsList>
+                      <TabsTrigger value="text">Text</TabsTrigger>
+                      <TabsTrigger value="json">JSON</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+              </div>
+              <div className="relative border rounded-md overflow-hidden">
+                <textarea
+                  id="body"
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  className="w-full min-h-[300px] bg-transparent px-3 py-2 text-sm font-mono relative z-10 resize-none border-0 focus:outline-none focus:ring-0"
+                  placeholder={bodyFormat === "json" ? '{\n  "key": "value"\n}' : "Enter message body"}
+                  required
+                  spellCheck={false}
+                />
+                <div
+                  className="absolute inset-0 pointer-events-none z-0 overflow-auto"
+                  style={{ padding: "0.5rem" }}
+                >
+                  <pre className="text-sm font-mono m-0" style={{ whiteSpace: "pre-wrap", wordWrap: "break-word" }}>
+                    <SyntaxHighlighter
+                      language={bodyFormat === "json" ? "json" : "text"}
+                      style={isDarkMode ? vscDarkPlus : coy}
+                      customStyle={{
+                        margin: 0,
+                        padding: 0,
+                        background: "transparent",
+                        fontSize: "0.875rem",
+                      }}
+                      PreTag="span"
+                    >
+                      {body || " "}
+                    </SyntaxHighlighter>
+                  </pre>
                 </div>
               </div>
             </div>
+
+            {/* Optional Fields - Collapsed */}
+            <Collapsible defaultOpen={false}>
+              <CollapsibleTrigger className="text-sm font-medium text-muted-foreground hover:text-foreground">
+                Optional Fields
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="space-y-4 pt-2">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="messageId">Message ID</Label>
+                      <Input
+                        id="messageId"
+                        value={messageId}
+                        onChange={(e) => setMessageId(e.target.value)}
+                        placeholder="Auto-generated if empty"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="contentType">Content Type</Label>
+                      <Input
+                        id="contentType"
+                        value={contentType}
+                        onChange={(e) => setContentType(e.target.value)}
+                        placeholder="application/json"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="correlationId">Correlation ID</Label>
+                      <Input
+                        id="correlationId"
+                        value={correlationId}
+                        onChange={(e) => setCorrelationId(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="sessionId">Session ID</Label>
+                      <Input
+                        id="sessionId"
+                        value={sessionId}
+                        onChange={(e) => setSessionId(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label htmlFor="subject">Subject</Label>
+                      <Input
+                        id="subject"
+                        value={subject}
+                        onChange={(e) => setSubject(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Custom Properties</Label>
+                    <div className="space-y-2">
+                      {Object.entries(customProperties).map(([key, value]) => (
+                        <div key={key} className="flex items-center gap-2">
+                          <Input value={key} disabled className="flex-1" />
+                          <Input value={value} disabled className="flex-1" />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleRemoveProperty(key)}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      ))}
+                      <div className="flex items-center gap-2">
+                        <Input
+                          placeholder="Property key"
+                          value={newPropertyKey}
+                          onChange={(e) => setNewPropertyKey(e.target.value)}
+                          className="flex-1"
+                        />
+                        <Input
+                          placeholder="Property value"
+                          value={newPropertyValue}
+                          onChange={(e) => setNewPropertyValue(e.target.value)}
+                          className="flex-1"
+                        />
+                        <Button type="button" variant="outline" onClick={handleAddProperty}>
+                          Add
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

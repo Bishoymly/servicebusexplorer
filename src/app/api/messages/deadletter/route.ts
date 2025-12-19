@@ -10,10 +10,10 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { queueName, maxCount = 10 } = body
+    const { queueName, topicName, subscriptionName, maxCount = 10 } = body
 
-    if (!queueName) {
-      return NextResponse.json({ error: "Queue name is required" }, { status: 400 })
+    if (!queueName && (!topicName || !subscriptionName)) {
+      return NextResponse.json({ error: "Either queueName or (topicName and subscriptionName) is required" }, { status: 400 })
     }
 
     const connection: ServiceBusConnection = JSON.parse(connectionStr)
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     
     // Limit maxCount to prevent memory issues
     const safeMaxCount = Math.min(maxCount || 100, 1000)
-    const messages = await client.peekDeadLetterMessages(queueName, safeMaxCount)
+    const messages = await client.peekDeadLetterMessages(queueName, topicName, subscriptionName, safeMaxCount)
     
     await client.close()
     return NextResponse.json({ messages })
