@@ -126,7 +126,7 @@ export function MessageList({ queueName, topicName, subscriptionName }: MessageL
   const loadDeadLetterMessages = async () => {
     setMessages([]) // Clear for progressive loading
     if (selectedQueue) {
-      const msgs = await peekDeadLetterMessages(selectedQueue, maxCount)
+      const msgs = await peekDeadLetterMessages(selectedQueue, undefined, maxCount)
       // Progressive rendering
       const batchSize = 50
       const seen = new Set<string>()

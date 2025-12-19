@@ -12,7 +12,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { useTopics } from "@/hooks/useTopics"
-import type { TopicProperties } from "@/types/azure"
+import type { TopicProperties, ServiceBusConnection } from "@/types/azure"
 
 interface TopicSettingsFormProps {
   topic?: TopicProperties

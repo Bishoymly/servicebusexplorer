@@ -182,7 +182,8 @@ export function InlineMessageViewer({ message, onResend }: InlineMessageViewerPr
                   }}
                   onSelect={(e) => {
                     // Also expand if user successfully selects text
-                    if (!expanded && window.getSelection()?.toString().length > 0) {
+                    const selection = window.getSelection()?.toString()
+                    if (!expanded && selection && selection.length > 0) {
                       setExpanded(true)
                     }
                   }}

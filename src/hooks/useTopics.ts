@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import type { TopicProperties, SubscriptionProperties } from "@/types/azure"
+import type { TopicProperties, SubscriptionProperties, ServiceBusConnection } from "@/types/azure"
 import { apiClient } from "@/lib/api/client"
 import { useConnections } from "./useConnections"
 
