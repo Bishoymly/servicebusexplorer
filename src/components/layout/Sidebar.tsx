@@ -15,6 +15,7 @@ import { SubscriptionSettingsForm } from "@/components/topics/SubscriptionSettin
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
 import { useSelectedResource } from "@/contexts/SelectedResourceContext"
 import { TreeRefreshProvider } from "@/contexts/TreeRefreshContext"
+import { useDemoMode } from "@/contexts/DemoModeContext"
 import type { ServiceBusConnection } from "@/types/azure"
 
 export function Sidebar() {
@@ -22,8 +23,55 @@ export function Sidebar() {
   const pathname = usePathname()
   const { connections, addConnection, removeConnection } = useConnections()
   const { selectedResource, setSelectedResource } = useSelectedResource()
+  const { isDemoMode, toggleDemoMode } = useDemoMode()
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [connectionToDelete, setConnectionToDelete] = useState<{ id: string; name: string } | null>(null)
+
+  // Keyboard shortcut: Press D key 3 times quickly, or Ctrl/Cmd+D
+  useEffect(() => {
+    let keyPressCount = 0
+    let keyPressTimer: NodeJS.Timeout | null = null
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+D or Cmd+D to toggle demo mode
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault()
+        toggleDemoMode()
+        return
+      }
+
+      // Press D key 3 times quickly
+      if (e.key === 'd' || e.key === 'D') {
+        e.preventDefault()
+        keyPressCount++
+        
+        if (keyPressCount >= 3) {
+          toggleDemoMode()
+          keyPressCount = 0
+          if (keyPressTimer) {
+            clearTimeout(keyPressTimer)
+            keyPressTimer = null
+          }
+        } else {
+          // Reset counter after 1 second of inactivity
+          if (keyPressTimer) {
+            clearTimeout(keyPressTimer)
+          }
+          keyPressTimer = setTimeout(() => {
+            keyPressCount = 0
+          }, 1000)
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      if (keyPressTimer) {
+        clearTimeout(keyPressTimer)
+      }
+    }
+  }, [toggleDemoMode])
   
   const handleDeleteRequest = (connectionId: string, connectionName: string) => {
     setConnectionToDelete({ id: connectionId, name: connectionName })
@@ -39,6 +87,7 @@ export function Sidebar() {
   
   const handleConfirmDelete = () => {
     if (connectionToDelete) {
+      console.log("Deleting connection:", connectionToDelete.id)
       removeConnection(connectionToDelete.id)
       handleConnectionRemoved(connectionToDelete.id)
       setDeleteDialogOpen(false)
@@ -214,8 +263,16 @@ export function Sidebar() {
   return (
     <TreeRefreshProvider refreshConnection={refreshConnection}>
       <div className="flex h-full w-96 flex-col border-r bg-card">
-      <div className="flex h-16 items-center border-b px-4">
-        <h1 className="text-lg font-semibold">Service Bus Explorer</h1>
+      <div className="flex h-16 items-center justify-between border-b px-4">
+        <h1 className="text-lg font-semibold">
+          Service Bus Explorer
+        </h1>
+        {isDemoMode && (
+          <div className="flex items-center gap-2 px-2 py-1 bg-yellow-500/20 border border-yellow-500/50 rounded text-xs text-yellow-600 dark:text-yellow-400">
+            <span className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
+            DEMO MODE
+          </div>
+        )}
       </div>
       
       <div className="border-b p-2">

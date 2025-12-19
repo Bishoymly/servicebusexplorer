@@ -3,7 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { SelectedResourceProvider } from "@/contexts/SelectedResourceContext"
-import { TreeRefreshProvider } from "@/contexts/TreeRefreshContext";
+import { TreeRefreshProvider } from "@/contexts/TreeRefreshContext"
+import { DemoModeProvider } from "@/contexts/DemoModeContext"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,10 +32,12 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <SelectedResourceProvider>
-          <div className="flex h-screen overflow-hidden">
-            <Sidebar />
-            <main className="flex-1 overflow-hidden">{children}</main>
-          </div>
+          <DemoModeProvider>
+            <div className="flex h-screen overflow-hidden">
+              <Sidebar />
+              <main className="flex-1 overflow-hidden">{children}</main>
+            </div>
+          </DemoModeProvider>
         </SelectedResourceProvider>
       </body>
     </html>

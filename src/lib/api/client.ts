@@ -5,8 +5,19 @@ import type {
   SubscriptionProperties,
   ServiceBusMessage,
 } from "@/types/azure"
+import {
+  MOCK_CONNECTION,
+  MOCK_QUEUES,
+  MOCK_TOPICS,
+  MOCK_SUBSCRIPTIONS,
+  generateMockMessages,
+} from "@/lib/demo/mockData"
 
 class ApiClient {
+  private isDemoMode(): boolean {
+    if (typeof window === "undefined") return false
+    return localStorage.getItem("demoMode") === "true"
+  }
   private getConnectionHeader(connection: ServiceBusConnection | null): HeadersInit {
     if (!connection) {
       throw new Error("No connection available")
@@ -18,6 +29,11 @@ class ApiClient {
   }
 
   async listQueues(connection: ServiceBusConnection | null): Promise<QueueProperties[]> {
+    if (this.isDemoMode()) {
+      // Simulate async delay
+      await new Promise(resolve => setTimeout(resolve, 300))
+      return [...MOCK_QUEUES]
+    }
     const response = await fetch("/api/queues", {
       headers: this.getConnectionHeader(connection),
     })
@@ -30,6 +46,14 @@ class ApiClient {
   }
 
   async getQueue(connection: ServiceBusConnection | null, queueName: string): Promise<QueueProperties> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 200))
+      const queue = MOCK_QUEUES.find(q => q.name === queueName)
+      if (!queue) {
+        throw new Error(`Queue "${queueName}" not found`)
+      }
+      return { ...queue }
+    }
     const response = await fetch(`/api/queues/${encodeURIComponent(queueName)}`, {
       headers: this.getConnectionHeader(connection),
     })
@@ -46,6 +70,11 @@ class ApiClient {
     queueName: string,
     properties?: Partial<QueueProperties>
   ): Promise<void> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+      // In demo mode, just simulate success
+      return
+    }
     const response = await fetch("/api/queues/create", {
       method: "POST",
       headers: this.getConnectionHeader(connection),
@@ -62,6 +91,10 @@ class ApiClient {
     queueName: string,
     properties: Partial<QueueProperties>
   ): Promise<void> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 400))
+      return
+    }
     const response = await fetch(`/api/queues/${encodeURIComponent(queueName)}`, {
       method: "PUT",
       headers: this.getConnectionHeader(connection),
@@ -74,6 +107,10 @@ class ApiClient {
   }
 
   async deleteQueue(connection: ServiceBusConnection | null, queueName: string): Promise<void> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 300))
+      return
+    }
     const response = await fetch(`/api/queues/${encodeURIComponent(queueName)}`, {
       method: "DELETE",
       headers: this.getConnectionHeader(connection),
@@ -85,6 +122,10 @@ class ApiClient {
   }
 
   async listTopics(connection: ServiceBusConnection | null): Promise<TopicProperties[]> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 300))
+      return [...MOCK_TOPICS]
+    }
     const response = await fetch("/api/topics", {
       headers: this.getConnectionHeader(connection),
     })
@@ -97,6 +138,14 @@ class ApiClient {
   }
 
   async getTopic(connection: ServiceBusConnection | null, topicName: string): Promise<TopicProperties> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 200))
+      const topic = MOCK_TOPICS.find(t => t.name === topicName)
+      if (!topic) {
+        throw new Error(`Topic "${topicName}" not found`)
+      }
+      return { ...topic }
+    }
     const response = await fetch(`/api/topics/${encodeURIComponent(topicName)}`, {
       headers: this.getConnectionHeader(connection),
     })
@@ -113,6 +162,10 @@ class ApiClient {
     topicName: string,
     properties?: Partial<TopicProperties>
   ): Promise<void> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+      return
+    }
     const response = await fetch("/api/topics/create", {
       method: "POST",
       headers: this.getConnectionHeader(connection),
@@ -129,6 +182,10 @@ class ApiClient {
     topicName: string,
     properties: Partial<TopicProperties>
   ): Promise<void> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 400))
+      return
+    }
     const response = await fetch(`/api/topics/${encodeURIComponent(topicName)}`, {
       method: "PUT",
       headers: this.getConnectionHeader(connection),
@@ -141,6 +198,10 @@ class ApiClient {
   }
 
   async deleteTopic(connection: ServiceBusConnection | null, topicName: string): Promise<void> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 300))
+      return
+    }
     const response = await fetch(`/api/topics/${encodeURIComponent(topicName)}`, {
       method: "DELETE",
       headers: this.getConnectionHeader(connection),
@@ -155,6 +216,10 @@ class ApiClient {
     connection: ServiceBusConnection | null,
     topicName: string
   ): Promise<SubscriptionProperties[]> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 200))
+      return [...(MOCK_SUBSCRIPTIONS[topicName] || [])]
+    }
     const response = await fetch(`/api/topics/${encodeURIComponent(topicName)}/subscriptions`, {
       headers: this.getConnectionHeader(connection),
     })
@@ -172,6 +237,10 @@ class ApiClient {
     subscriptionName: string,
     properties?: Partial<SubscriptionProperties>
   ): Promise<void> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+      return
+    }
     const response = await fetch(`/api/topics/${encodeURIComponent(topicName)}/subscriptions/create`, {
       method: "POST",
       headers: this.getConnectionHeader(connection),
@@ -190,6 +259,10 @@ class ApiClient {
     subscriptionName?: string,
     maxCount: number = 10
   ): Promise<ServiceBusMessage[]> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 400))
+      return generateMockMessages(queueName, topicName, subscriptionName, false, maxCount)
+    }
     const response = await fetch("/api/messages/peek", {
       method: "POST",
       headers: this.getConnectionHeader(connection),
@@ -210,6 +283,10 @@ class ApiClient {
     subscriptionName?: string,
     maxCount: number = 10
   ): Promise<ServiceBusMessage[]> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 400))
+      return generateMockMessages(queueName, topicName, subscriptionName, true, maxCount)
+    }
     const response = await fetch("/api/messages/deadletter", {
       method: "POST",
       headers: this.getConnectionHeader(connection),
@@ -228,6 +305,11 @@ class ApiClient {
     queueName: string,
     message: ServiceBusMessage
   ): Promise<void> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+      // In demo mode, just simulate success
+      return
+    }
     const response = await fetch("/api/messages/send", {
       method: "POST",
       headers: this.getConnectionHeader(connection),
@@ -244,6 +326,10 @@ class ApiClient {
     topicName: string,
     message: ServiceBusMessage
   ): Promise<void> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+      return
+    }
     const response = await fetch("/api/messages/send", {
       method: "POST",
       headers: this.getConnectionHeader(connection),
@@ -260,6 +346,15 @@ class ApiClient {
     queueName: string,
     purgeDeadLetter: boolean = false
   ): Promise<number> {
+    if (this.isDemoMode()) {
+      await new Promise(resolve => setTimeout(resolve, 600))
+      // Return a mock purged count
+      const queue = MOCK_QUEUES.find(q => q.name === queueName)
+      if (queue) {
+        return purgeDeadLetter ? (queue.deadLetterMessageCount || 0) : (queue.activeMessageCount || 0)
+      }
+      return 0
+    }
     const response = await fetch("/api/messages/purge", {
       method: "POST",
       headers: this.getConnectionHeader(connection),

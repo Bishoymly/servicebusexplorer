@@ -12,9 +12,12 @@ import {
   loadCurrentConnectionId,
   saveCurrentConnectionId,
 } from "@/lib/storage/connections"
+import { MOCK_CONNECTION } from "@/lib/demo/mockData"
+import { useDemoMode } from "@/contexts/DemoModeContext"
 
 export function useConnections() {
   const pathname = usePathname()
+  const { isDemoMode } = useDemoMode()
   const [connections, setConnections] = useState<ServiceBusConnection[]>([])
   // Always start with null to avoid hydration mismatch
   const [currentConnectionId, setCurrentConnectionId] = useState<string | null>(null)
@@ -31,36 +34,73 @@ export function useConnections() {
     return null
   }, [pathname])
 
-  useEffect(() => {
+  // Function to update connections based on demo mode
+  const updateConnectionsForDemoMode = useCallback(() => {
     const loaded = loadConnections()
-    setConnections(loaded)
     
-    if (loaded.length > 0) {
+    // In demo mode, ensure mock connection exists
+    let connectionsToUse = loaded
+    if (isDemoMode) {
+      const hasDemoConnection = loaded.some(c => c.id === MOCK_CONNECTION.id)
+      if (!hasDemoConnection) {
+        // Add demo connection if it doesn't exist
+        connectionsToUse = [MOCK_CONNECTION, ...loaded]
+        addConnectionStorage(MOCK_CONNECTION)
+      } else {
+        // Update demo connection to ensure it's first
+        connectionsToUse = [MOCK_CONNECTION, ...loaded.filter(c => c.id !== MOCK_CONNECTION.id)]
+      }
+    } else {
+      // Remove demo connection if demo mode is disabled
+      connectionsToUse = loaded.filter(c => c.id !== MOCK_CONNECTION.id)
+    }
+    
+    setConnections(connectionsToUse)
+    
+    if (connectionsToUse.length > 0) {
+      // In demo mode, always use demo connection
+      if (isDemoMode) {
+        setCurrentConnectionId(MOCK_CONNECTION.id)
+        saveCurrentConnectionId(MOCK_CONNECTION.id)
+        return
+      }
+      
       // First, check if URL contains a connection name
       const urlConnectionName = getConnectionNameFromUrl()
       if (urlConnectionName) {
-        const urlConnection = loaded.find((c) => c.name === urlConnectionName)
+        const urlConnection = connectionsToUse.find((c) => c.name === urlConnectionName)
         if (urlConnection) {
           setCurrentConnectionId(urlConnection.id)
-          setLoading(false)
           return
         }
       }
       
       // If no URL connection, load saved connection ID from localStorage
       const savedConnectionId = loadCurrentConnectionId()
-      if (savedConnectionId && loaded.some((c) => c.id === savedConnectionId)) {
+      if (savedConnectionId && connectionsToUse.some((c) => c.id === savedConnectionId)) {
         setCurrentConnectionId(savedConnectionId)
       } else {
         // Default to first connection if no saved ID or saved ID doesn't exist
-        setCurrentConnectionId(loaded[0].id)
+        setCurrentConnectionId(connectionsToUse[0].id)
       }
     } else {
       setCurrentConnectionId(null)
     }
-    
+  }, [isDemoMode, getConnectionNameFromUrl])
+
+  // Initial load
+  useEffect(() => {
+    updateConnectionsForDemoMode()
     setLoading(false)
-  }, [getConnectionNameFromUrl]) // Include getConnectionNameFromUrl in dependencies
+  }, [updateConnectionsForDemoMode])
+
+  // Update connections when demo mode changes
+  useEffect(() => {
+    if (!loading) {
+      updateConnectionsForDemoMode()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDemoMode, loading])
 
   // Sync connection ID with URL when pathname changes (priority over localStorage)
   useEffect(() => {
@@ -102,9 +142,20 @@ export function useConnections() {
   }, [])
 
   const removeConnection = useCallback((connectionId: string) => {
+    // Don't allow deleting the demo connection if demo mode is active
+    if (isDemoMode && connectionId === MOCK_CONNECTION.id) {
+      console.log("Cannot delete demo connection while demo mode is active")
+      return
+    }
+    
+    console.log("Removing connection from storage:", connectionId)
     deleteConnectionStorage(connectionId)
+    
     setConnections((prev) => {
+      console.log("Previous connections:", prev.map(c => c.id))
       const filtered = prev.filter((c) => c.id !== connectionId)
+      console.log("Filtered connections:", filtered.map(c => c.id))
+      
       if (currentConnectionId === connectionId) {
         if (filtered.length > 0) {
           setCurrentConnectionId(filtered[0].id)
@@ -113,9 +164,18 @@ export function useConnections() {
           saveCurrentConnectionId(null)
         }
       }
+      // If demo mode is active and we removed a non-demo connection, ensure demo connection is still first
+      if (isDemoMode && filtered.some(c => c.id === MOCK_CONNECTION.id)) {
+        const demoConnection = filtered.find(c => c.id === MOCK_CONNECTION.id)
+        const otherConnections = filtered.filter(c => c.id !== MOCK_CONNECTION.id)
+        const result = demoConnection ? [demoConnection, ...otherConnections] : filtered
+        console.log("Final connections (with demo first):", result.map(c => c.id))
+        return result
+      }
+      console.log("Final connections:", filtered.map(c => c.id))
       return filtered
     })
-  }, [currentConnectionId])
+  }, [currentConnectionId, isDemoMode])
 
   const currentConnection = connections.find((c) => c.id === currentConnectionId) || null
 

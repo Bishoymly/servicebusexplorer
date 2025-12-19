@@ -89,6 +89,31 @@ export function useTreeData(
   // Load data for all connections
   useEffect(() => {
     const connectionIds = connections.map(c => c.id)
+    
+    // Check if demo mode changed (demo connection added/removed)
+    const hasDemoConnection = connectionIds.includes("demo-connection")
+    const hadDemoConnection = Array.from(loadedConnectionsRef.current).some(id => id === "demo-connection")
+    
+    // If demo mode state changed, clear the demo connection from ref to force reload
+    if (hasDemoConnection !== hadDemoConnection) {
+      if (hasDemoConnection) {
+        loadedConnectionsRef.current.delete("demo-connection")
+        // Clear demo connection data
+        setConnectionData(prev => {
+          const next = { ...prev }
+          delete next["demo-connection"]
+          return next
+        })
+      } else {
+        loadedConnectionsRef.current.delete("demo-connection")
+        setConnectionData(prev => {
+          const next = { ...prev }
+          delete next["demo-connection"]
+          return next
+        })
+      }
+    }
+    
     connectionIds.forEach(connectionId => {
       if (!loadedConnectionsRef.current.has(connectionId)) {
         loadedConnectionsRef.current.add(connectionId)

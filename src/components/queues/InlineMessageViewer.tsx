@@ -113,7 +113,7 @@ export function InlineMessageViewer({ message, onResend }: InlineMessageViewerPr
         <div className={expanded ? "flex gap-0 p-0" : "flex gap-0 p-0"}>
           {/* Combined Container with Border */}
           <div 
-            className={`flex-1 flex rounded-md border border-foreground/30 overflow-hidden shadow-md ${isDarkMode ? "bg-muted/30" : "bg-background"} ${!expanded ? "max-h-[9em]" : ""} cursor-pointer`}
+            className={`flex-1 flex rounded-md border border-foreground/30 overflow-hidden shadow-md ${isDarkMode ? "bg-muted/30" : "bg-background"} ${!expanded ? "max-h-[9em]" : ""} cursor-pointer relative`}
             onClick={(e) => {
               // Expand when clicking anywhere in the panel (but don't collapse)
               if (!expanded) {
@@ -123,7 +123,24 @@ export function InlineMessageViewer({ message, onResend }: InlineMessageViewerPr
           >
             {/* Message Body - Left Side */}
             <div className={`flex-1 min-w-0 relative ${!expanded ? "flex items-stretch" : ""}`}>
-              <div className={`overflow-hidden ${expanded ? "h-full" : ""} ${isDarkMode ? "bg-muted/30" : "bg-background"}`}>
+              <div className={`overflow-hidden ${expanded ? "h-full" : ""} ${isDarkMode ? "bg-muted/30" : "bg-background"} relative`}>
+                {/* Expand/Collapse Button - Top Right of message content */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setExpanded(!expanded)
+                  }}
+                >
+                  {expanded ? (
+                    <ChevronUp className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" />
+                  )}
+                </Button>
+                
                 {/* Copy and Resend Buttons - Top Right (left of expand/collapse) */}
                 {expanded && (
                   <div className="absolute top-2 right-10 flex gap-2 z-20">
@@ -154,25 +171,9 @@ export function InlineMessageViewer({ message, onResend }: InlineMessageViewerPr
                     )}
                   </div>
                 )}
-                {/* Expand/Collapse Button - Top Right */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity bg-background/80 backdrop-blur-sm"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setExpanded(!expanded)
-                  }}
-                >
-                  {expanded ? (
-                    <ChevronUp className="h-4 w-4" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4" />
-                  )}
-                </Button>
                 
                 <div 
-                  className={expanded ? "h-full overflow-auto" : "overflow-hidden"}
+                  className={`${expanded ? "h-full overflow-auto" : "overflow-hidden relative"} w-full`}
                   onMouseDown={(e) => {
                     // Auto-expand when user starts selecting text (but don't collapse)
                     if (!expanded) {
@@ -201,17 +202,34 @@ export function InlineMessageViewer({ message, onResend }: InlineMessageViewerPr
                     background: "transparent",
                     fontSize: "0.875rem",
                     color: isDarkMode ? undefined : "hsl(var(--foreground))",
+                    width: "100%",
+                    display: "block",
                   }}
                     wrapLines
                     codeTagProps={{
                       style: {
                         color: isDarkMode ? undefined : "hsl(var(--foreground))",
+                        width: "100%",
+                        display: "block",
                       },
                     }}
                   >
                     {bodyString}
                   </SyntaxHighlighter>
                 </div>
+                
+                {/* Bottom gradient overlay for collapsed view - positioned on parent container */}
+                {!expanded && (
+                  <div 
+                    className="absolute bottom-0 left-0 right-0 h-16 pointer-events-none"
+                    style={{
+                      zIndex: 30,
+                      background: isDarkMode 
+                        ? "linear-gradient(to bottom, rgba(0,0,0,0), hsl(var(--muted) / 0.95))"
+                        : "linear-gradient(to bottom, rgba(255,255,255,0), hsl(var(--background) / 0.95))"
+                    }}
+                  />
+                )}
               </div>
             </div>
 
@@ -219,7 +237,7 @@ export function InlineMessageViewer({ message, onResend }: InlineMessageViewerPr
             <div className="w-px bg-border flex-shrink-0"></div>
 
             {/* Properties - Right Side */}
-            <div className="w-[32rem] flex-shrink-0">
+            <div className="w-1/3 flex-shrink-0">
               <div className="h-full overflow-auto">
                 <Table>
                   <TableBody>
