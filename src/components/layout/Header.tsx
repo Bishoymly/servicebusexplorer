@@ -7,7 +7,6 @@ import { useConnections } from "@/hooks/useConnections"
 import { CheckCircle2, XCircle, Plus, ShoppingCart } from "lucide-react"
 import { useLicense } from "@/hooks/useLicense"
 import { PurchaseDialog } from "@/components/license/PurchaseDialog"
-import { useState } from "react"
 import { ConnectionForm } from "@/components/connections/ConnectionForm"
 import type { ServiceBusConnection } from "@/types/azure"
 

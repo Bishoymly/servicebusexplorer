@@ -142,8 +142,58 @@ else
 fi
 echo ""
 
-# Step 2: Re-sign the app with App Store certificate
-echo "✍️  Step 2: Re-signing app with App Store certificate..."
+# Step 2: Verify provisioning profile and signing identity match
+echo "✍️  Step 2: Verifying provisioning profile..."
+PROVISION_PROFILE_SRC="src-tauri/embedded.provisionprofile"
+if [ ! -f "$PROVISION_PROFILE_SRC" ]; then
+    echo "❌ Error: Provisioning profile not found at $PROVISION_PROFILE_SRC"
+    echo "   Please ensure the provisioning profile is in src-tauri/"
+    exit 1
+fi
+
+# Extract certificate CN from provisioning profile and verify it matches signing identity
+echo "   Extracting certificate from provisioning profile..."
+TEMP_PLIST=$(mktemp)
+TEMP_CERT=$(mktemp)
+
+# Decode the provisioning profile
+if security cms -D -i "$PROVISION_PROFILE_SRC" > "$TEMP_PLIST" 2>/dev/null; then
+    # Extract the first certificate (base64 encoded)
+    CERT_B64=$(plutil -extract DeveloperCertificates.0 raw -o - "$TEMP_PLIST" 2>/dev/null)
+    
+    if [ -n "$CERT_B64" ]; then
+        # Decode base64 and extract CN
+        echo "$CERT_B64" | base64 -d > "$TEMP_CERT" 2>/dev/null
+        PROVISION_CERT_CN=$(openssl x509 -inform DER -in "$TEMP_CERT" -noout -subject 2>/dev/null | \
+            sed -n 's/.*CN=\([^,]*\).*/\1/p' || echo "")
+        
+        if [ -n "$PROVISION_CERT_CN" ]; then
+            echo "   Certificate CN in provisioning profile: $PROVISION_CERT_CN"
+            # Check if signing identity contains the CN from provisioning profile
+            if echo "$SIGNING_IDENTITY" | grep -qF "$PROVISION_CERT_CN"; then
+                echo "   ✅ Signing identity matches provisioning profile certificate"
+            else
+                echo "   ⚠️  Warning: Signing identity may not match provisioning profile"
+                echo "   Provisioning profile certificate CN: $PROVISION_CERT_CN"
+                echo "   Signing identity: $SIGNING_IDENTITY"
+                echo "   Make sure the CN in SIGNING_IDENTITY matches the provisioning profile"
+            fi
+        else
+            echo "   ⚠️  Warning: Could not extract CN from certificate"
+        fi
+    else
+        echo "   ⚠️  Warning: Could not extract certificate data from provisioning profile"
+    fi
+else
+    echo "   ⚠️  Warning: Could not decode provisioning profile"
+fi
+
+# Cleanup temp files
+rm -f "$TEMP_PLIST" "$TEMP_CERT"
+echo ""
+
+# Step 3: Re-sign the app with App Store certificate
+echo "✍️  Step 3: Re-signing app with App Store certificate..."
 echo "   Using identity: $SIGNING_IDENTITY"
 
 # First, remove any existing signature
@@ -152,15 +202,12 @@ codesign --remove-signature "$APP_PATH" 2>/dev/null || true
 # Ensure provisioning profile is embedded (required for App Store)
 PROVISION_PROFILE="$APP_PATH/Contents/embedded.provisionprofile"
 if [ ! -f "$PROVISION_PROFILE" ]; then
-    # Try to find it in src-tauri
-    if [ -f "src-tauri/embedded.provisionprofile" ]; then
-        echo "   Copying provisioning profile to app bundle..."
-        mkdir -p "$APP_PATH/Contents"
-        cp "src-tauri/embedded.provisionprofile" "$PROVISION_PROFILE"
-    else
-        echo "   ⚠️  Warning: Provisioning profile not found!"
-        echo "   Make sure src-tauri/embedded.provisionprofile exists"
-    fi
+    echo "   Copying provisioning profile to app bundle..."
+    mkdir -p "$APP_PATH/Contents"
+    cp "$PROVISION_PROFILE_SRC" "$PROVISION_PROFILE"
+    echo "   ✅ Provisioning profile embedded"
+else
+    echo "   ✅ Provisioning profile already embedded"
 fi
 
 # Sign the main executable first (CRITICAL for App Store validation)
@@ -259,8 +306,8 @@ else
 fi
 echo ""
 
-# Step 3: Verify the signature
-echo "🔍 Step 3: Verifying signature..."
+# Step 4: Verify the signature
+echo "🔍 Step 4: Verifying signature..."
 set +e
 VERIFY_OUTPUT=$(codesign --verify --deep --strict --verbose=2 "$APP_PATH" 2>&1)
 VERIFY_RESULT=$?
@@ -280,13 +327,13 @@ else
 fi
 echo ""
 
-# Step 4: Check for Gatekeeper
-echo "🛡️  Step 4: Checking Gatekeeper status..."
+# Step 5: Check for Gatekeeper
+echo "🛡️  Step 5: Checking Gatekeeper status..."
 spctl -a -vv "$APP_PATH" 2>&1 | head -5 || echo "   (Note: May show warnings for App Store builds)"
 echo ""
 
-# Step 5: Create .pkg installer
-echo "📦 Step 5: Creating .pkg installer..."
+# Step 6: Create .pkg installer
+echo "📦 Step 6: Creating .pkg installer..."
 echo "   Using installer identity: $INSTALLER_IDENTITY"
 
 # Ensure provisioning profile is embedded before creating .pkg
@@ -325,13 +372,13 @@ else
 fi
 echo ""
 
-# Step 6: Verify .pkg signature
-echo "🔍 Step 6: Verifying .pkg signature..."
+# Step 7: Verify .pkg signature
+echo "🔍 Step 7: Verifying .pkg signature..."
 pkgutil --check-signature "$OUTPUT_DIR/$PKG_NAME"
 echo ""
 
-# Step 7: Optional - Submit for notarization
-echo "📤 Step 7: Notarization (optional)"
+# Step 8: Optional - Submit for notarization
+echo "📤 Step 8: Notarization (optional)"
 read -p "   Do you want to submit for notarization now? (y/n) " -n 1 -r
 echo ""
 if [[ $REPLY =~ ^[Yy]$ ]]; then
