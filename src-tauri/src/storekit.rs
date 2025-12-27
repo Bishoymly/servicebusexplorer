@@ -171,6 +171,11 @@ mod macos {
 
     /// Check for valid purchase transaction using StoreKit 2
     /// This requires macOS 12.0+ and StoreKit 2
+    /// 
+    /// Note: This is a placeholder for future StoreKit 2 implementation.
+    /// Currently falls back to receipt checking.
+    /// See STOREKIT_IMPLEMENTATION.md for details.
+    #[allow(dead_code)]
     pub fn check_storekit2_transaction() -> Result<bool, String> {
         // StoreKit 2 implementation would go here
         // This requires Swift/Objective-C interop or a native bridge

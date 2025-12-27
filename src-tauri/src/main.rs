@@ -21,8 +21,6 @@ struct LicenseStatus {
     trial_start_date: Option<i64>,
 }
 
-const PRODUCT_ID: &str = "com.bishoylabib.servicebusexplorer.full";
-
 // Find an available port starting from the preferred port
 fn find_available_port(start_port: u16) -> u16 {
     for port in start_port..=start_port + 100 {
