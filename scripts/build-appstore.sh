@@ -326,6 +326,51 @@ if [ -f "$MAIN_EXECUTABLE" ]; then
     fi
 fi
 
+# Sign nested dependencies first (dylibs, .node files, etc.)
+# These need to be signed before signing the bundle with proper requirements
+# Apple requires these to satisfy the app bundle's requirements
+echo "   Signing nested dependencies (dylibs, .node files)..."
+echo "   (This may take a moment...)"
+
+# Count files to sign
+DEP_COUNT=$(find "$APP_PATH" -type f \( -name "*.dylib" -o -name "*.node" \) 2>/dev/null | wc -l | tr -d ' ')
+if [ "$DEP_COUNT" -gt 0 ]; then
+    echo "   Found $DEP_COUNT file(s) to sign"
+    
+    # Find and sign all dylibs and .node files
+    # CRITICAL: These must be signed with the bundle identifier to satisfy the app's requirements
+    # Apple's validation checks if nested code satisfies the parent app's designated requirement
+    find "$APP_PATH" -type f \( -name "*.dylib" -o -name "*.node" \) | while read -r file; do
+        # Remove existing signature (including adhoc signatures)
+        codesign --remove-signature "$file" 2>/dev/null || true
+        
+        # Sign with the same identity AND bundle identifier
+        # This ensures the nested code satisfies the app bundle's designated requirement
+        # which checks for: identifier "com.bishoylabib.servicebusexplorer"
+        set +e
+        codesign --force --sign "$SIGNING_IDENTITY" \
+            --options runtime \
+            --identifier "$BUNDLE_ID" \
+            --timestamp=none \
+            "$file" 2>&1 | grep -v "replacing existing signature" || true
+        SIGN_DEP_RESULT=$?
+        set -e
+        
+        if [ $SIGN_DEP_RESULT -ne 0 ]; then
+            echo "   ⚠️  Warning: Failed to sign $(basename "$file")"
+        else
+            # Verify the signature has the correct identifier
+            DEP_ID=$(codesign -d --verbose=2 "$file" 2>&1 | grep "Identifier=" | sed 's/.*Identifier=\([^ ]*\).*/\1/' || echo "")
+            if [ "$DEP_ID" = "$BUNDLE_ID" ]; then
+                echo "   ✅ Signed $(basename "$file") with identifier $BUNDLE_ID"
+            fi
+        fi
+    done
+    echo "   ✅ Nested dependencies signed"
+else
+    echo "   No nested dependencies found to sign"
+fi
+
 # Sign the app bundle with --deep to sign all nested code
 # Since we're using the same signing identity, --deep will re-sign with the same certificate
 echo "   Signing app bundle with all nested code..."
