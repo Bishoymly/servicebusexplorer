@@ -8,6 +8,9 @@
     <string>1.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>10.13</string>
+    <!-- App icon (required for App Store) -->
+    <key>CFBundleIconFile</key>
+    <string>icon</string>
     <!-- App Store category (required for Mac App Store submission) -->
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.developer-tools</string>

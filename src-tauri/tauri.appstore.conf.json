@@ -29,6 +29,7 @@
     "targets": ["app"],
     "icon": [
       "icons/1024x1024.png",
+      "icons/512x512@2x.png",
       "icons/512x512.png",
       "icons/128x128@2x.png",
       "icons/128x128.png",
