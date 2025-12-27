@@ -149,26 +149,57 @@ echo "   Using identity: $SIGNING_IDENTITY"
 # First, remove any existing signature
 codesign --remove-signature "$APP_PATH" 2>/dev/null || true
 
-# Sign the main executable first (required for proper designated requirement)
+# Ensure provisioning profile is embedded (required for App Store)
+PROVISION_PROFILE="$APP_PATH/Contents/embedded.provisionprofile"
+if [ ! -f "$PROVISION_PROFILE" ]; then
+    # Try to find it in src-tauri
+    if [ -f "src-tauri/embedded.provisionprofile" ]; then
+        echo "   Copying provisioning profile to app bundle..."
+        mkdir -p "$APP_PATH/Contents"
+        cp "src-tauri/embedded.provisionprofile" "$PROVISION_PROFILE"
+    else
+        echo "   ⚠️  Warning: Provisioning profile not found!"
+        echo "   Make sure src-tauri/embedded.provisionprofile exists"
+    fi
+fi
+
+# Sign the main executable first (CRITICAL for App Store validation)
+# Must be signed with the certificate from the provisioning profile
 MAIN_EXECUTABLE="$APP_PATH/Contents/MacOS/servicebusexplorer"
 if [ -f "$MAIN_EXECUTABLE" ]; then
     echo "   Signing main executable first..."
+    # Remove any existing signature
+    codesign --remove-signature "$MAIN_EXECUTABLE" 2>/dev/null || true
+    # Sign with the App Store certificate (must match provisioning profile)
     codesign --force --sign "$SIGNING_IDENTITY" \
         --options runtime \
-        "$MAIN_EXECUTABLE" 2>&1 || true
+        "$MAIN_EXECUTABLE" 2>&1 || {
+        echo "   ❌ Failed to sign main executable"
+        exit 1
+    }
+    echo "   ✅ Main executable signed"
+    
+    # Verify executable signature
+    if codesign --verify --verbose=2 "$MAIN_EXECUTABLE" >/dev/null 2>&1; then
+        echo "   ✅ Executable signature verified"
+    else
+        echo "   ⚠️  Warning: Executable signature verification had issues"
+    fi
 fi
 
-# Sign the app bundle
+# Sign the app bundle with provisioning profile
 echo "   Signing app bundle..."
 echo "   (This may take a moment...)"
 
 # Sign without --timestamp to avoid hanging on timestamp server
 # Timestamp is optional for App Store builds
+# Use --deep to sign nested code, and ensure provisioning profile is embedded
 # Disable set -e temporarily to capture errors properly
 set +e
 CODESIGN_OUTPUT=$(codesign --force --deep --sign "$SIGNING_IDENTITY" \
     --entitlements "$ENTITLEMENTS" \
     --options runtime \
+    --identifier "$BUNDLE_ID" \
     "$APP_PATH" 2>&1)
 
 SIGN_RESULT=$?
@@ -258,11 +289,24 @@ echo ""
 echo "📦 Step 5: Creating .pkg installer..."
 echo "   Using installer identity: $INSTALLER_IDENTITY"
 
+# Ensure provisioning profile is embedded before creating .pkg
+PROVISION_PROFILE="$APP_PATH/Contents/embedded.provisionprofile"
+if [ ! -f "$PROVISION_PROFILE" ] && [ -f "src-tauri/embedded.provisionprofile" ]; then
+    echo "   Ensuring provisioning profile is embedded..."
+    mkdir -p "$APP_PATH/Contents"
+    cp "src-tauri/embedded.provisionprofile" "$PROVISION_PROFILE"
+    # Re-sign the app bundle to include the provisioning profile
+    codesign --force --deep --sign "$SIGNING_IDENTITY" \
+        --entitlements "$ENTITLEMENTS" \
+        --options runtime \
+        "$APP_PATH" >/dev/null 2>&1 || true
+fi
+
 # Create a temporary directory for the installer
 TEMP_DIR=$(mktemp -d)
 trap "rm -rf $TEMP_DIR" EXIT
 
-# Copy app to temp directory
+# Copy app to temp directory (including provisioning profile)
 cp -R "$APP_PATH" "$TEMP_DIR/"
 
 # Build the .pkg
