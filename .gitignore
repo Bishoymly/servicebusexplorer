@@ -43,3 +43,8 @@ next-env.d.ts
 # tauri
 src-tauri/target/
 src-tauri/WixTools/
+*.provisionprofile
+
+# app store build outputs
+dist/appstore/
+*.pkg

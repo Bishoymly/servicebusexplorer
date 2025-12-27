@@ -26,7 +26,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app-store"],
+    "targets": ["app"],
     "icon": [
       "icons/1024x1024.png",
       "icons/512x512.png",
@@ -44,7 +44,6 @@
       "files": {
         "embedded.provisionprofile": "embedded.provisionprofile"
       },
-      "category": "public.app-category.developer-tools",
       "frameworks": [],
       "minimumSystemVersion": "10.13"
     }
