@@ -7,6 +7,21 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 use tauri::Manager;
+use serde::{Deserialize, Serialize};
+
+#[cfg(target_os = "macos")]
+mod storekit;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct LicenseStatus {
+    is_trial: bool,
+    is_purchased: bool,
+    is_expired: bool,
+    days_remaining: i32,
+    trial_start_date: Option<i64>,
+}
+
+const PRODUCT_ID: &str = "com.bishoylabib.servicebusexplorer.full";
 
 // Find an available port starting from the preferred port
 fn find_available_port(start_port: u16) -> u16 {
@@ -73,6 +88,112 @@ fn start_nextjs_server(port: u16) -> Option<std::process::Child> {
     None
 }
 
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn check_license_status() -> Result<LicenseStatus, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    
+    // Check if app was purchased via App Store
+    let is_purchased = match storekit::check_purchase_status() {
+        Ok(true) => true,
+        Ok(false) => false,
+        Err(e) => {
+            eprintln!("Error checking purchase status: {}", e);
+            false
+        }
+    };
+    
+    if is_purchased {
+        return Ok(LicenseStatus {
+            is_trial: false,
+            is_purchased: true,
+            is_expired: false,
+            days_remaining: -1,
+            trial_start_date: None,
+        });
+    }
+    
+    // Not purchased - return trial status
+    // Note: Trial tracking is handled in the frontend via localStorage
+    // This function only checks App Store purchase status
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    
+    Ok(LicenseStatus {
+        is_trial: true,
+        is_purchased: false,
+        is_expired: false,
+        days_remaining: 3,
+        trial_start_date: Some(now),
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn check_license_status() -> Result<LicenseStatus, String> {
+    // Non-macOS platforms: always return purchased (no restrictions)
+    Ok(LicenseStatus {
+        is_trial: false,
+        is_purchased: true,
+        is_expired: false,
+        days_remaining: -1,
+        trial_start_date: None,
+    })
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn initiate_purchase() -> Result<(), String> {
+    // Use StoreKit module to initiate purchase
+    storekit::initiate_purchase()
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn initiate_purchase() -> Result<(), String> {
+    Err("Purchases are only available on macOS".to_string())
+}
+
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn verify_receipt() -> Result<bool, String> {
+    // Read receipt from app bundle
+    match storekit::read_receipt() {
+        Ok(Some(receipt_data)) => {
+            // Verify receipt with Apple's servers
+            storekit::verify_receipt_with_apple(&receipt_data)
+        }
+        Ok(None) => {
+            // No receipt found
+            Ok(false)
+        }
+        Err(e) => {
+            Err(format!("Failed to read receipt: {}", e))
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+fn verify_receipt() -> Result<bool, String> {
+    // Non-macOS: always return true (no restrictions)
+    Ok(true)
+}
+
+#[tauri::command]
+fn get_trial_start_date() -> Result<Option<i64>, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    
+    Ok(Some(now))
+}
+
 fn main() {
     #[cfg(not(debug_assertions))]
     {
@@ -99,6 +220,12 @@ fn main() {
         let port_for_setup = port;
         let app = tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
+            .invoke_handler(tauri::generate_handler![
+                check_license_status,
+                initiate_purchase,
+                verify_receipt,
+                get_trial_start_date
+            ])
             .setup(move |app| {
                 // Get a handle that can be used across threads
                 let app_handle = app.handle().clone();
@@ -128,6 +255,12 @@ fn main() {
     {
         tauri::Builder::default()
             .plugin(tauri_plugin_shell::init())
+            .invoke_handler(tauri::generate_handler![
+                check_license_status,
+                initiate_purchase,
+                verify_receipt,
+                get_trial_start_date
+            ])
             .run(tauri::generate_context!())
             .expect("error while running tauri application");
     }

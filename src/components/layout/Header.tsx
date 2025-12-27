@@ -4,7 +4,10 @@ import { useEffect, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useConnections } from "@/hooks/useConnections"
-import { CheckCircle2, XCircle, Plus } from "lucide-react"
+import { CheckCircle2, XCircle, Plus, ShoppingCart } from "lucide-react"
+import { useLicense } from "@/hooks/useLicense"
+import { PurchaseDialog } from "@/components/license/PurchaseDialog"
+import { useState } from "react"
 import { ConnectionForm } from "@/components/connections/ConnectionForm"
 import type { ServiceBusConnection } from "@/types/azure"
 
@@ -12,8 +15,10 @@ export function Header() {
   const pathname = usePathname()
   const router = useRouter()
   const { connections, currentConnectionId, setCurrentConnectionId, currentConnection, addConnection } = useConnections()
+  const { licenseStatus } = useLicense()
   const [mounted, setMounted] = useState(false)
   const [formOpen, setFormOpen] = useState(false)
+  const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(false)
 
   useEffect(() => {
     setMounted(true)
@@ -105,11 +110,24 @@ export function Header() {
         )}
       </div>
 
+      <div className="flex items-center gap-4">
+        {licenseStatus.isTrial && !licenseStatus.isPurchased && (
+          <button
+            onClick={() => setPurchaseDialogOpen(true)}
+            className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium text-primary hover:bg-accent"
+          >
+            <ShoppingCart className="h-4 w-4" />
+            Purchase
+          </button>
+        )}
+      </div>
+
       <ConnectionForm
         open={formOpen}
         onOpenChange={setFormOpen}
         onSubmit={handleFormSubmit}
       />
+      <PurchaseDialog open={purchaseDialogOpen} onOpenChange={setPurchaseDialogOpen} />
     </header>
   )
 }

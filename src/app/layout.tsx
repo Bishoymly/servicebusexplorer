@@ -5,6 +5,10 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { SelectedResourceProvider } from "@/contexts/SelectedResourceContext"
 import { TreeRefreshProvider } from "@/contexts/TreeRefreshContext"
 import { DemoModeProvider } from "@/contexts/DemoModeContext"
+import { LicenseProvider } from "@/contexts/LicenseContext"
+import { TrialBanner } from "@/components/license/TrialBanner"
+import { LicenseGate } from "@/components/license/LicenseGate"
+import { LicenseTestHelper } from "@/components/license/LicenseTestHelper"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,14 +35,22 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <SelectedResourceProvider>
-          <DemoModeProvider>
-            <div className="flex h-screen overflow-hidden">
-              <Sidebar />
-              <main className="flex-1 overflow-hidden">{children}</main>
-            </div>
-          </DemoModeProvider>
-        </SelectedResourceProvider>
+        <LicenseProvider>
+          <LicenseTestHelper />
+          <SelectedResourceProvider>
+            <DemoModeProvider>
+              <LicenseGate>
+                <div className="flex h-screen flex-col overflow-hidden">
+                  <TrialBanner />
+                  <div className="flex flex-1 overflow-hidden">
+                    <Sidebar />
+                    <main className="flex-1 overflow-hidden">{children}</main>
+                  </div>
+                </div>
+              </LicenseGate>
+            </DemoModeProvider>
+          </SelectedResourceProvider>
+        </LicenseProvider>
       </body>
     </html>
   );
