@@ -6,7 +6,7 @@ import { useConnections } from "./useConnections"
 import { apiClient } from "@/lib/api/client"
 import type { TreeNode } from "@/components/ui/tree"
 import type { QueueProperties, TopicProperties, SubscriptionProperties, QueueSortOption, TopicSortOption, SubscriptionSortOption } from "@/types/azure"
-import { Database, MessageSquare, FolderTree, Mail, RefreshCw, ArrowUpDown, Trash2, Plus } from "lucide-react"
+import { Database, MessageSquare, FolderTree, Mail, RefreshCw, ArrowUpDown, Trash2, Plus, AlertCircle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -41,6 +41,7 @@ export function useTreeData(
   const { connections, currentConnectionId, removeConnection } = useConnections()
   const [connectionData, setConnectionData] = useState<Record<string, ConnectionTreeData>>({})
   const [loading, setLoading] = useState<Record<string, boolean>>({})
+  const [connectionErrors, setConnectionErrors] = useState<Record<string, boolean>>({})
   const [sortPreferences, setSortPreferences] = useState<Record<string, {
     queueSort?: QueueSortOption
     topicSort?: TopicSortOption
@@ -53,6 +54,7 @@ export function useTreeData(
     if (!connection) return
 
     setLoading(prev => ({ ...prev, [connectionId]: true }))
+    setConnectionErrors(prev => ({ ...prev, [connectionId]: false }))
 
     try {
       // Load queues and topics in parallel
@@ -78,9 +80,11 @@ export function useTreeData(
         ...prev,
         [connectionId]: { queues, topics, subscriptions },
       }))
+      setConnectionErrors(prev => ({ ...prev, [connectionId]: false }))
       loadedConnectionsRef.current.add(connectionId)
     } catch (err) {
       console.error(`Failed to load data for connection ${connectionId}:`, err)
+      setConnectionErrors(prev => ({ ...prev, [connectionId]: true }))
     } finally {
       setLoading(prev => ({ ...prev, [connectionId]: false }))
     }
@@ -317,7 +321,9 @@ export function useTreeData(
         const sortedSubs = [...subs].sort((a, b) => {
           switch (subscriptionSort) {
             case "name":
-              return a.subscriptionName.localeCompare(b.subscriptionName)
+              const aName = a.subscriptionName || ""
+              const bName = b.subscriptionName || ""
+              return aName.localeCompare(bName)
             case "messageCount":
               return (b.activeMessageCount || 0) - (a.activeMessageCount || 0)
             case "deadLetterCount":
@@ -353,8 +359,8 @@ export function useTreeData(
             badges.push(React.createElement(Badge, { key: "scheduled", variant: "outline", className: "h-4 px-1 text-xs" }, `S: ${sub.transferMessageCount}`))
           }
           return {
-            id: `subscription-${connection.id}-${topic.name}-${sub.subscriptionName}`,
-            label: sub.subscriptionName,
+            id: `subscription-${connection.id}-${topic.name}-${sub.subscriptionName || "unknown"}`,
+            label: sub.subscriptionName || "Unknown Subscription",
             icon: React.createElement(Mail, { className: "h-3 w-3" }),
             badge: badges.length > 0 ? React.createElement("div", { className: "flex gap-1 text-xs" }, ...badges) : undefined,
             data: { type: "subscription", connection, topic, subscription: sub },
@@ -596,18 +602,24 @@ export function useTreeData(
         React.createElement(RefreshCw, { className: cn("h-3 w-3", loading[connection.id] && "animate-spin") })
       )
 
+      const hasError = connectionErrors[connection.id]
+      const connectionIcon = hasError 
+        ? React.createElement(AlertCircle, { className: "h-3 w-3 text-destructive" })
+        : React.createElement(Database, { className: "h-3 w-3" })
+
       return {
         id: `connection-${connection.id}`,
         label: connection.name,
-        icon: React.createElement(Database, { className: "h-3 w-3" }),
+        icon: connectionIcon,
         children: children.length > 0 ? children : undefined,
         data: { type: "connection", connection },
         actions: connectionDeleteAction,
         refreshAction: connectionRefreshAction,
         isLoading: loading[connection.id],
+        hasError,
       }
     })
-  }, [connections, connectionData, currentConnectionId, sortPreferences, handleRefreshQueues, handleRefreshTopics, handleSortChange, removeConnection, refreshConnection, loading, onConnectionRemoved, onDeleteRequest, onCreateQueue, onCreateTopic, onCreateSubscription])
+  }, [connections, connectionData, currentConnectionId, sortPreferences, handleRefreshQueues, handleRefreshTopics, handleSortChange, removeConnection, refreshConnection, loading, connectionErrors, onConnectionRemoved, onDeleteRequest, onCreateQueue, onCreateTopic, onCreateSubscription])
 
   const treeNodes = React.useMemo(() => buildTreeNodes(), [buildTreeNodes])
 

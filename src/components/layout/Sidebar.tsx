@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
+import Image from "next/image"
 import { Plus, Search } from "lucide-react"
 import { useRouter, usePathname } from "next/navigation"
 import { useConnections } from "@/hooks/useConnections"
@@ -85,13 +86,18 @@ export function Sidebar() {
     }
   }
   
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (connectionToDelete) {
-      console.log("Deleting connection:", connectionToDelete.id)
-      removeConnection(connectionToDelete.id)
-      handleConnectionRemoved(connectionToDelete.id)
-      setDeleteDialogOpen(false)
-      setConnectionToDelete(null)
+      try {
+        console.log("Deleting connection:", connectionToDelete.id)
+        await removeConnection(connectionToDelete.id)
+        handleConnectionRemoved(connectionToDelete.id)
+        setDeleteDialogOpen(false)
+        setConnectionToDelete(null)
+      } catch (error) {
+        console.error("Failed to delete connection:", error)
+        alert(`Failed to delete connection: ${error instanceof Error ? error.message : String(error)}`)
+      }
     }
   }
   
@@ -201,14 +207,24 @@ export function Sidebar() {
     }
   }
 
-  const handleAddConnection = (data: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt">) => {
-    addConnection({
-      ...data,
-      id: crypto.randomUUID(),
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    })
-    setFormOpen(false)
+  const handleAddConnection = async (data: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt">) => {
+    try {
+      const newConnection: ServiceBusConnection = {
+        ...data,
+        id: crypto.randomUUID(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }
+      console.log("Adding connection:", { name: newConnection.name, id: newConnection.id })
+      await addConnection(newConnection)
+      console.log("Connection added successfully")
+      setFormOpen(false)
+    } catch (error) {
+      console.error("Failed to add connection:", error)
+      // Keep form open on error so user can retry
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      alert(`Failed to add connection: ${errorMessage}`)
+    }
   }
 
   // Auto-expand connections by default and when new connections are added
@@ -263,12 +279,23 @@ export function Sidebar() {
   return (
     <TreeRefreshProvider refreshConnection={refreshConnection}>
       <div className="flex h-full w-96 flex-col border-r bg-card">
-      <div className="flex h-16 items-center justify-between border-b px-4">
-        <h1 className="text-lg font-semibold">
-          Service Bus Explorer
-        </h1>
+      <div className="border-b px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="relative h-12 w-12 shrink-0 -m-2">
+            <Image 
+              src="/app-icon.png" 
+              alt="Azure Service Bus Explorer" 
+              fill
+              className="object-contain"
+              unoptimized
+            />
+          </div>
+          <h1 className="text-lg font-semibold">
+            Azure Service Bus Explorer
+          </h1>
+        </div>
         {isDemoMode && (
-          <div className="flex items-center gap-2 px-2 py-1 bg-yellow-500/20 border border-yellow-500/50 rounded text-xs text-yellow-600 dark:text-yellow-400">
+          <div className="flex items-center gap-2 px-2 py-1 bg-yellow-500/20 border border-yellow-500/50 rounded text-xs text-yellow-600 dark:text-yellow-400 mt-2 ml-2">
             <span className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span>
             DEMO MODE
           </div>

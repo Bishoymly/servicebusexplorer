@@ -1,10 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { CheckCircle2, XCircle, Loader2 } from "lucide-react"
+import { apiClient } from "@/lib/api/client"
 import type { ServiceBusConnection } from "@/types/azure"
 
 interface ConnectionFormProps {
@@ -21,25 +24,184 @@ export function ConnectionForm({ open, onOpenChange, onSubmit, initialData }: Co
   const [namespace, setNamespace] = useState(initialData?.namespace || "")
   const [tenantId, setTenantId] = useState(initialData?.tenantId || "")
   const [clientId, setClientId] = useState(initialData?.clientId || "")
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Reset form when dialog opens/closes or initialData changes
+  useEffect(() => {
+    if (open) {
+      setName(initialData?.name || "")
+      setUseAzureAD(initialData?.useAzureAD || false)
+      setConnectionString(initialData?.connectionString || "")
+      setNamespace(initialData?.namespace || "")
+      setTenantId(initialData?.tenantId || "")
+      setClientId(initialData?.clientId || "")
+      setTestResult(null)
+    }
+  }, [open, initialData])
+
+  const handleTest = async () => {
+    // Validate required fields
+    if (!name.trim()) {
+      setTestResult({ success: false, message: "Please enter a connection name" })
+      return
+    }
+
+    if (useAzureAD && !namespace.trim()) {
+      setTestResult({ success: false, message: "Please enter a namespace" })
+      return
+    }
+
+    if (!useAzureAD && !connectionString.trim()) {
+      setTestResult({ success: false, message: "Please enter a connection string" })
+      return
+    }
+
+    setTesting(true)
+    setTestResult(null)
+
+    try {
+      const testConnection: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt"> = {
+        name,
+        connectionString: useAzureAD ? undefined : connectionString,
+        namespace: useAzureAD ? namespace : undefined,
+        useAzureAD,
+        tenantId: useAzureAD ? tenantId : undefined,
+        clientId: useAzureAD ? clientId : undefined,
+      }
+
+      const success = await apiClient.testConnection(testConnection)
+      if (success) {
+        setTestResult({ success: true, message: "Connection test successful!" })
+      } else {
+        setTestResult({ success: false, message: "Connection test failed. Please check your credentials." })
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
+      setTestResult({ success: false, message: `Connection test failed: ${errorMessage}` })
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    onSubmit({
-      name,
-      connectionString: useAzureAD ? undefined : connectionString,
-      namespace: useAzureAD ? namespace : undefined,
-      useAzureAD,
-      tenantId: useAzureAD ? tenantId : undefined,
-      clientId: useAzureAD ? clientId : undefined,
-    })
-    onOpenChange(false)
-    // Reset form
-    setName("")
-    setUseAzureAD(false)
-    setConnectionString("")
-    setNamespace("")
-    setTenantId("")
-    setClientId("")
+    
+    // Validate required fields
+    if (!name.trim()) {
+      setTestResult({ success: false, message: "Please enter a connection name" })
+      return
+    }
+
+    if (useAzureAD && !namespace.trim()) {
+      setTestResult({ success: false, message: "Please enter a namespace" })
+      return
+    }
+
+    if (!useAzureAD && !connectionString.trim()) {
+      setTestResult({ success: false, message: "Please enter a connection string" })
+      return
+    }
+
+    // Validate connection string before testing
+    if (!useAzureAD) {
+      const trimmed = connectionString.trim()
+      if (!trimmed) {
+        setTestResult({ 
+          success: false, 
+          message: "Connection string is required" 
+        })
+        setTesting(false)
+        return
+      }
+      // Basic validation: connection string should contain Endpoint=
+      if (!trimmed.includes("Endpoint=")) {
+        setTestResult({ 
+          success: false, 
+          message: "Invalid connection string format. It must include 'Endpoint='." 
+        })
+        setTesting(false)
+        return
+      }
+    } else {
+      // Validate Azure AD fields
+      if (!namespace?.trim()) {
+        setTestResult({ 
+          success: false, 
+          message: "Namespace is required for Azure AD authentication" 
+        })
+        setTesting(false)
+        return
+      }
+    }
+
+    // Automatically test connection before adding/updating
+    setTesting(true)
+    setTestResult(null)
+
+    try {
+      const testConnection: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt"> = {
+        name,
+        connectionString: useAzureAD ? undefined : connectionString.trim(),
+        namespace: useAzureAD ? namespace?.trim() : undefined,
+        useAzureAD,
+        tenantId: useAzureAD ? tenantId : undefined,
+        clientId: useAzureAD ? clientId : undefined,
+      }
+
+      let success: boolean
+      try {
+        success = await apiClient.testConnection(testConnection)
+      } catch (error) {
+        // If testConnection throws an error, it means the test failed
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        setTestResult({ 
+          success: false, 
+          message: errorMessage
+        })
+        setTesting(false)
+        return
+      }
+      
+      if (!success) {
+        setTestResult({ 
+          success: false, 
+          message: "Connection test failed. Please check your credentials and try again." 
+        })
+        setTesting(false)
+        return
+      }
+
+      // Test passed - proceed with adding/updating
+      setTestResult({ success: true, message: "Connection test successful! Saving..." })
+      
+      onSubmit({
+        name,
+        connectionString: useAzureAD ? undefined : connectionString,
+        namespace: useAzureAD ? namespace : undefined,
+        useAzureAD,
+        tenantId: useAzureAD ? tenantId : undefined,
+        clientId: useAzureAD ? clientId : undefined,
+      })
+      
+      // Close dialog and reset form
+      onOpenChange(false)
+      setName("")
+      setUseAzureAD(false)
+      setConnectionString("")
+      setNamespace("")
+      setTenantId("")
+      setClientId("")
+      setTestResult(null)
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
+      setTestResult({ 
+        success: false, 
+        message: `Connection test failed: ${errorMessage}. Please check your credentials and try again.` 
+      })
+    } finally {
+      setTesting(false)
+    }
   }
 
   return (
@@ -47,9 +209,20 @@ export function ConnectionForm({ open, onOpenChange, onSubmit, initialData }: Co
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>{initialData ? "Edit Connection" : "Add Connection"}</DialogTitle>
+          <DialogDescription>
+            {initialData ? "Update your connection settings" : "Enter your Azure Service Bus connection details"}
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
+            {testResult && !testing && testResult.success && (
+              <Alert variant="default">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  <AlertDescription>{testResult.message}</AlertDescription>
+                </div>
+              </Alert>
+            )}
             <div className="space-y-2">
               <Label htmlFor="name">Connection Name</Label>
               <Input
@@ -85,6 +258,12 @@ export function ConnectionForm({ open, onOpenChange, onSubmit, initialData }: Co
                     placeholder="my-namespace"
                     required
                   />
+                  {testing && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      <span>Testing connection...</span>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="tenantId">Tenant ID (Optional)</Label>
@@ -112,10 +291,29 @@ export function ConnectionForm({ open, onOpenChange, onSubmit, initialData }: Co
                   id="connectionString"
                   type="password"
                   value={connectionString}
-                  onChange={(e) => setConnectionString(e.target.value)}
+                  onChange={(e) => {
+                    setConnectionString(e.target.value)
+                    // Clear error when user starts typing
+                    if (testResult && !testResult.success) {
+                      setTestResult(null)
+                    }
+                  }}
                   placeholder="Endpoint=sb://..."
                   required
+                  className={testResult && !testResult.success ? "border-destructive" : ""}
                 />
+                {testing && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    <span>Testing connection...</span>
+                  </div>
+                )}
+                {testResult && !testResult.success && (
+                  <p className="text-sm text-destructive flex items-center gap-1">
+                    <XCircle className="h-3 w-3" />
+                    {testResult.message}
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -123,7 +321,19 @@ export function ConnectionForm({ open, onOpenChange, onSubmit, initialData }: Co
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">{initialData ? "Update" : "Add"}</Button>
+            <Button 
+              type="submit" 
+              disabled={testing}
+            >
+              {testing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Testing...
+                </>
+              ) : (
+                initialData ? "Update" : "Add"
+              )}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

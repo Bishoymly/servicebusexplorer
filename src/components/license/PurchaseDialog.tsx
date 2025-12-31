@@ -12,6 +12,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { CheckCircle2, Sparkles } from "lucide-react"
 
+const APP_TITLE = "Azure Service Bus Explorer"
+
 interface PurchaseDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -25,12 +27,8 @@ export function PurchaseDialog({ open, onOpenChange }: PurchaseDialogProps) {
     // Don't close dialog immediately - let user complete purchase
   }
 
-  const handleOpenAppStore = () => {
-    window.open(
-      "https://apps.apple.com/app/azure-service-bus-explorer/id6756694985",
-      "_blank"
-    )
-  }
+  const isExpired = licenseStatus.isExpired
+  const daysRemaining = licenseStatus.daysRemaining
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -40,23 +38,28 @@ export function PurchaseDialog({ open, onOpenChange }: PurchaseDialogProps) {
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
               <Sparkles className="h-6 w-6 text-primary" />
             </div>
-            <div>
-              <DialogTitle>Upgrade to Full Version</DialogTitle>
-              <DialogDescription>Unlock all features with a one-time purchase</DialogDescription>
+            <div className="flex-1">
+              <DialogTitle className="text-xl">{APP_TITLE}</DialogTitle>
+              <DialogDescription>
+                {isExpired 
+                  ? "Your trial has expired. Purchase now to continue using all features."
+                  : daysRemaining > 0
+                  ? `Upgrade to unlock all features (${daysRemaining} day${daysRemaining !== 1 ? "s" : ""} remaining)`
+                  : "Upgrade to unlock all features with a one-time purchase"}
+              </DialogDescription>
             </div>
           </div>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {licenseStatus.isExpired ? (
-            <div className="rounded-lg bg-destructive/10 p-4 text-sm text-destructive">
-              Your trial has expired. Purchase now to continue using Azure Service Bus Explorer.
+          {isExpired && (
+            <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-4">
+              <div className="text-sm font-medium text-destructive mb-1">Trial Expired</div>
+              <div className="text-sm text-destructive/80">
+                Your 3-day trial has ended. Purchase the full version to continue using {APP_TITLE}.
+              </div>
             </div>
-          ) : licenseStatus.daysRemaining > 0 ? (
-            <div className="rounded-lg bg-blue-50 dark:bg-blue-950 p-4 text-sm">
-              <strong>{licenseStatus.daysRemaining} day{licenseStatus.daysRemaining !== 1 ? "s" : ""}</strong> remaining in your trial
-            </div>
-          ) : null}
+          )}
 
           <div className="space-y-3">
             <div className="flex items-start gap-3">
@@ -96,11 +99,8 @@ export function PurchaseDialog({ open, onOpenChange }: PurchaseDialogProps) {
           </div>
         </div>
 
-        <DialogFooter className="flex-col sm:flex-row gap-2">
-          <Button variant="outline" onClick={handleOpenAppStore} className="w-full sm:w-auto">
-            Open App Store
-          </Button>
-          <Button onClick={handlePurchase} className="w-full sm:w-auto">
+        <DialogFooter>
+          <Button onClick={handlePurchase} className="w-full">
             Purchase Now
           </Button>
         </DialogFooter>

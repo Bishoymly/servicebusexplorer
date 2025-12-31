@@ -1,6 +1,7 @@
 "use client"
 
 import { ReactNode } from "react"
+import Image from "next/image"
 import { useLicense } from "@/hooks/useLicense"
 import { PurchaseDialog } from "./PurchaseDialog"
 import { useState } from "react"
@@ -41,59 +42,40 @@ export function LicenseGate({ children }: LicenseGateProps) {
     return <>{children}</>
   }
 
-  // Trial expired (after grace period): block access
+  // Trial expired (after grace period): show purchase dialog
   if (licenseStatus.isExpired) {
     return (
       <>
-        <div className="flex h-screen items-center justify-center bg-background p-8">
-          <Card className="w-full max-w-md">
-            <CardHeader className="text-center">
-              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
-                <Lock className="h-8 w-8 text-destructive" />
+        <div className="flex h-screen flex-col bg-background">
+          {/* Header with app icon and title */}
+          <div className="flex items-center gap-3 p-6 border-b">
+            <div className="relative h-8 w-8 shrink-0">
+              <Image 
+                src="/app-icon.png" 
+                alt="Azure Service Bus Explorer" 
+                fill
+                className="object-contain"
+                unoptimized
+              />
+            </div>
+            <h1 className="text-xl font-semibold">Azure Service Bus Explorer</h1>
+          </div>
+
+          {/* Main content */}
+          <div className="flex-1 flex items-center justify-center p-8">
+            <div className="text-center w-full max-w-md">
+              <div className="mb-6">
+                <Lock className="h-12 w-12 text-muted-foreground mx-auto" />
               </div>
-              <CardTitle>Trial Expired</CardTitle>
-              <CardDescription>
-                Your 3-day trial has ended. Purchase the full version to continue using Azure Service Bus Explorer.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="rounded-lg bg-muted p-4 text-center">
-                <div className="text-3xl font-bold">$19.99</div>
-                <div className="text-sm text-muted-foreground">One-time purchase</div>
-              </div>
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                  <span>Full feature access</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                  <span>Lifetime updates</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                  <span>No subscriptions</span>
-                </div>
-              </div>
-            </CardContent>
-            <CardFooter className="flex-col gap-2">
-              <Button onClick={() => setPurchaseDialogOpen(true)} className="w-full">
+              <h2 className="text-2xl font-semibold mb-2">Trial Expired</h2>
+              <p className="text-muted-foreground mb-6">
+                Please purchase the full version to continue using all features.
+              </p>
+              <Button onClick={() => setPurchaseDialogOpen(true)} size="lg">
                 Purchase Now
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  window.open(
-                    "https://apps.apple.com/app/azure-service-bus-explorer/id6756694985",
-                    "_blank"
-                  )
-                }}
-                className="w-full"
-              >
-                Open App Store
-              </Button>
-            </CardFooter>
-          </Card>
+            </div>
+          </div>
         </div>
         <PurchaseDialog open={purchaseDialogOpen} onOpenChange={setPurchaseDialogOpen} />
       </>

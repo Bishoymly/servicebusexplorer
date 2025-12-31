@@ -1,16 +1,16 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::net::TcpListener;
-use std::path::PathBuf;
-use std::process::Command;
-use std::thread;
-use std::time::Duration;
-use tauri::Manager;
 use serde::{Deserialize, Serialize};
 
 #[cfg(target_os = "macos")]
 mod storekit;
+
+mod azure;
+// Keychain module is no longer used - we use tauri-plugin-keyring directly in commands
+
+use azure::types::*;
+use azure::servicebus::ServiceBusClient;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct LicenseStatus {
@@ -21,106 +21,6 @@ struct LicenseStatus {
     trial_start_date: Option<i64>,
 }
 
-// Find an available port starting from the preferred port
-fn find_available_port(start_port: u16) -> u16 {
-    for port in start_port..=start_port + 100 {
-        if TcpListener::bind(("127.0.0.1", port)).is_ok() {
-            return port;
-        }
-    }
-    // Fallback: let the OS assign a port
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind to any port");
-    listener.local_addr().unwrap().port()
-}
-
-#[cfg(not(debug_assertions))]
-fn start_nextjs_server(port: u16) -> Option<std::process::Child> {
-    // Get the app's resource directory
-    // On macOS: Contents/Resources inside .app bundle
-    // On Windows/Linux: resources directory next to executable
-    let exe = std::env::current_exe().expect("Failed to get executable path");
-    let mut app_dir: PathBuf = exe.parent().expect("Failed to get app directory").to_path_buf();
-    
-    // On macOS, we might be in Contents/MacOS, so go up to Contents
-    #[cfg(target_os = "macos")]
-    {
-        if app_dir.ends_with("MacOS") {
-            app_dir = app_dir.parent().unwrap().to_path_buf();
-        }
-        // Then to Contents/Resources
-        if app_dir.ends_with("Contents") {
-            app_dir = app_dir.join("Resources");
-        }
-    }
-    
-    let resource_dir = app_dir.join("resources");
-    
-    // Try to find the standalone server in various locations
-    // Tauri bundles target/resources/standalone/**/* to Resources/target/resources/standalone/
-    let server_paths = vec![
-        app_dir.join("target").join("resources").join("standalone").join("server.js"), // Tauri bundle path
-        resource_dir.join("standalone").join("server.js"), // Alternative path
-        app_dir.join("standalone").join("server.js"),
-        PathBuf::from("standalone").join("server.js"),
-    ];
-    
-    for server_path in &server_paths {
-        if server_path.exists() {
-            let server_dir = server_path.parent().unwrap();
-            println!("Found server at: {:?}", server_path);
-            
-            // Try to find node executable - bundled Node.js takes priority
-            // Check MacOS/ first (where Xcode signs it with provisioning profile)
-            let node_paths = vec![
-                app_dir.join("MacOS").join("node"), // Xcode-signed version (has provisioning profile)
-                server_dir.join("node"), // Bundled Node.js (in standalone directory)
-                app_dir.join("node"), // Alternative location
-                app_dir.join("Resources").join("node"), // In Resources directory
-                PathBuf::from("/usr/bin/node"), // System node (may not work in sandbox)
-                PathBuf::from("node"), // Try PATH (last resort)
-            ];
-            
-            let mut node_cmd = None;
-            for node_path in &node_paths {
-                if node_path.exists() {
-                    node_cmd = Some(node_path.clone());
-                    println!("✅ Found Node.js at: {:?}", node_path);
-                    break;
-                }
-            }
-            
-            // If no node found, try system node (will likely fail in sandbox)
-            let node_exec = node_cmd.unwrap_or_else(|| {
-                eprintln!("⚠️  Warning: No bundled Node.js found, trying system node (may fail in TestFlight)");
-                PathBuf::from("node")
-            });
-            
-            println!("Starting Next.js server from: {:?} on port {}", server_dir, port);
-            match Command::new(&node_exec)
-                .arg(server_path.to_str().unwrap())
-                .env("PORT", port.to_string())
-                .env("HOSTNAME", "127.0.0.1")
-                .current_dir(server_dir)
-                .spawn()
-            {
-                Ok(child) => {
-                    println!("Server process started successfully (PID: {})", child.id());
-                    return Some(child);
-                }
-                Err(e) => {
-                    eprintln!("Failed to start server with {:?}: {:?}", node_exec, e);
-                    // Continue to next path
-                }
-            }
-        }
-    }
-    
-    eprintln!("Warning: Could not find standalone server. Tried paths:");
-    for path in &server_paths {
-        eprintln!("  {:?} (exists: {})", path, path.exists());
-    }
-    None
-}
 
 #[cfg(target_os = "macos")]
 #[tauri::command]
@@ -228,226 +128,386 @@ fn get_trial_start_date() -> Result<Option<i64>, String> {
     Ok(Some(now))
 }
 
-fn main() {
-    #[cfg(not(debug_assertions))]
-    {
-        // Find an available port (starting from 1420 - Tauri's default, less common than 3000)
-        let port = find_available_port(1420);
-        println!("Using port: {}", port);
-        
-        // Start the server first and wait for it to be ready
-        let port_clone = port;
-        let _server_handle = thread::spawn(move || {
-            // Wait a bit for Tauri to initialize
-            thread::sleep(Duration::from_secs(1));
+// Keychain commands using tauri-plugin-keyring
+#[tauri::command]
+fn store_connection_string(
+    app: tauri::AppHandle,
+    connection_id: String, 
+    connection_string: String, 
+    _connection_name: String
+) -> Result<(), String> {
+    use tauri_plugin_keyring::KeyringExt;
+    use std::collections::HashMap;
+    use serde_json;
+    
+    const SERVICE_NAME: &str = "com.azureservicebusexplorer";
+    const MASTER_ACCOUNT: &str = "all_connections";
+    
+    // Load existing connections
+    let mut all_connections: HashMap<String, String> = match app.keyring().get_password(SERVICE_NAME, MASTER_ACCOUNT) {
+        Ok(Some(json_data)) => {
+            serde_json::from_str(&json_data).unwrap_or_else(|_| HashMap::new())
+        }
+        _ => HashMap::new()
+    };
+    
+    // Update/add the new connection
+    all_connections.insert(connection_id, connection_string);
+    
+    // Store all connections back as JSON
+    let json_data = serde_json::to_string(&all_connections)
+        .map_err(|e| format!("Failed to serialize connection strings: {}", e))?;
+    
+    app.keyring()
+        .set_password(SERVICE_NAME, MASTER_ACCOUNT, &json_data)
+        .map_err(|e| format!("Failed to store connection string in keychain: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+fn get_connection_string(
+    app: tauri::AppHandle,
+    connection_id: String
+) -> Result<String, String> {
+    use tauri_plugin_keyring::KeyringExt;
+    use std::collections::HashMap;
+    use serde_json;
+    
+    const SERVICE_NAME: &str = "com.azureservicebusexplorer";
+    const MASTER_ACCOUNT: &str = "all_connections";
+    
+    // Load all connections from single keychain entry
+    match app.keyring().get_password(SERVICE_NAME, MASTER_ACCOUNT) {
+        Ok(Some(json_data)) => {
+            let all_connections: HashMap<String, String> = serde_json::from_str(&json_data)
+                .map_err(|e| format!("Failed to parse connection strings: {}", e))?;
             
-            if let Some(mut child) = start_nextjs_server(port_clone) {
-                println!("Server process started (PID: {})", child.id());
-                // Wait a bit for server to start
-                thread::sleep(Duration::from_secs(2)); // Increased wait time for TestFlight
-                
-                // Check if server process is still running
-                if let Ok(Some(status)) = child.try_wait() {
-                    eprintln!("Server process exited early with status: {:?}", status);
-                    return;
-                }
-                
-                // Check if server is ready by trying to connect
-                let mut ready = false;
-                for attempt in 0..30 { // Increased attempts for TestFlight
-                    // Check if process is still alive
-                    if let Ok(Some(status)) = child.try_wait() {
-                        eprintln!("Server process died during startup (attempt {}): {:?}", attempt, status);
-                        break;
+            all_connections.get(&connection_id)
+                .cloned()
+                .ok_or_else(|| "Connection string not found".to_string())
+        }
+        Ok(None) => Err("Connection string not found".to_string()),
+        Err(e) => Err(format!("Failed to get connection string from keychain: {}", e))
+    }
+}
+
+#[tauri::command]
+fn delete_connection_string(
+    app: tauri::AppHandle,
+    connection_id: String
+) -> Result<(), String> {
+    use tauri_plugin_keyring::KeyringExt;
+    use std::collections::HashMap;
+    use serde_json;
+    
+    const SERVICE_NAME: &str = "com.azureservicebusexplorer";
+    const MASTER_ACCOUNT: &str = "all_connections";
+    
+    // Load existing connections
+    let mut all_connections: HashMap<String, String> = match app.keyring().get_password(SERVICE_NAME, MASTER_ACCOUNT) {
+        Ok(Some(json_data)) => {
+            serde_json::from_str(&json_data).unwrap_or_else(|_| HashMap::new())
+        }
+        _ => HashMap::new()
+    };
+    
+    // Remove the connection
+    all_connections.remove(&connection_id);
+    
+    // Store updated connections back
+    let json_data = serde_json::to_string(&all_connections)
+        .map_err(|e| format!("Failed to serialize connection strings: {}", e))?;
+    
+    app.keyring()
+        .set_password(SERVICE_NAME, MASTER_ACCOUNT, &json_data)
+        .map_err(|e| format!("Failed to update connection strings in keychain: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+fn list_connection_ids() -> Result<Vec<String>, String> {
+    // The keyring plugin doesn't support listing all entries
+    // The frontend handles listing via localStorage metadata
+    Ok(Vec::new())
+}
+
+#[tauri::command]
+fn get_all_connection_strings(
+    app: tauri::AppHandle,
+    connection_ids: Vec<String>
+) -> Result<std::collections::HashMap<String, String>, String> {
+    use tauri_plugin_keyring::KeyringExt;
+    use std::collections::HashMap;
+    use serde_json;
+    
+    const SERVICE_NAME: &str = "com.azureservicebusexplorer";
+    const MASTER_ACCOUNT: &str = "all_connections";
+    
+    // Try to get from single master entry first
+    match app.keyring().get_password(SERVICE_NAME, MASTER_ACCOUNT) {
+        Ok(Some(json_data)) => {
+            // Parse JSON data
+            match serde_json::from_str::<HashMap<String, String>>(&json_data) {
+                Ok(connections) => {
+                    // If we have connections, return them
+                    if !connections.is_empty() {
+                        return Ok(connections);
                     }
-                    
-                    if let Ok(stream) = std::net::TcpStream::connect(format!("127.0.0.1:{}", port_clone)) {
-                        ready = true;
-                        let _ = stream.shutdown(std::net::Shutdown::Both);
-                        println!("Server is ready on port {} after {} attempts", port_clone, attempt + 1);
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(500)); // Increased interval
                 }
-                
-                if !ready {
-                    eprintln!("Server never became ready on port {}", port_clone);
-                    // Check final process status
-                    if let Ok(Some(status)) = child.try_wait() {
-                        eprintln!("Server process final status: {:?}", status);
-                    } else {
-                        eprintln!("Server process is still running but not responding");
-                    }
+                Err(e) => {
+                    eprintln!("Failed to parse connection strings JSON: {}", e);
                 }
-                
-                // Keep process alive - don't wait() here as it blocks
-                // The process will be cleaned up when the app exits
-            } else {
-                eprintln!("Failed to start Next.js server - check logs above for details");
             }
-        });
-        
-        // Store port in environment variable so we can access it in Tauri commands if needed
-        std::env::set_var("TAURI_PORT", port.to_string());
-        
-        // Build Tauri app with a loading screen initially
-        let port_for_setup = port;
-        let app = tauri::Builder::default()
-            .plugin(tauri_plugin_shell::init())
-            .invoke_handler(tauri::generate_handler![
-                check_license_status,
-                initiate_purchase,
-                verify_receipt,
-                get_trial_start_date
-            ])
-            .setup(move |app| {
-                // Get a handle that can be used across threads
-                let app_handle = app.handle().clone();
-                let port = port_for_setup;
-                
-                // Show loading screen immediately using eval to inject HTML
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    // Inject loading screen HTML directly
-                    let script = r#"
-                        document.open();
-                        document.write(`
-                            <!DOCTYPE html>
-                            <html>
-                            <head>
-                                <meta charset="utf-8">
-                                <title>Azure Service Bus Explorer</title>
-                                <style>
-                                    body {
-                                        margin: 0;
-                                        padding: 0;
-                                        display: flex;
-                                        justify-content: center;
-                                        align-items: center;
-                                        height: 100vh;
-                                        background: linear-gradient(135deg, #ffffff 0%, #f8f8f8 100%);
-                                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-                                    }
-                                    .loader {
-                                        text-align: center;
-                                        color: #1a1a1a;
-                                    }
-                                    .spinner {
-                                        border: 3px solid rgba(102, 126, 234, 0.2);
-                                        border-top: 3px solid #667eea;
-                                        border-radius: 50%;
-                                        width: 40px;
-                                        height: 40px;
-                                        animation: spin 1s linear infinite;
-                                        margin: 24px auto 0;
-                                    }
-                                    @keyframes spin {
-                                        0% { transform: rotate(0deg); }
-                                        100% { transform: rotate(360deg); }
-                                    }
-                                    h1 {
-                                        margin: 0;
-                                        font-size: 28px;
-                                        font-weight: 600;
-                                        color: #1a1a1a;
-                                    }
-                                    p {
-                                        margin: 8px 0 0 0;
-                                        opacity: 0.6;
-                                        font-size: 15px;
-                                        color: #666;
-                                    }
-                                </style>
-                            </head>
-                            <body>
-                                <div class="loader">
-                                    <h1>Azure Service Bus Explorer</h1>
-                                    <p>Starting application...</p>
-                                    <div class="spinner"></div>
-                                </div>
-                            </body>
-                            </html>
-                        `);
-                        document.close();
-                    "#;
-                    if let Err(e) = window.eval(script) {
-                        eprintln!("Failed to load loading screen: {:?}", e);
-                    }
-                }
-                
-                // Spawn thread to wait for server and navigate
-                thread::spawn(move || {
-                    // Wait longer for server to be ready (TestFlight may be slower)
-                    let mut server_ready = false;
-                    let max_attempts = 60; // 12 seconds total (60 * 200ms)
-                    
-                    for attempt in 0..max_attempts {
-                        if let Ok(stream) = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
-                            server_ready = true;
-                            let _ = stream.shutdown(std::net::Shutdown::Both);
-                            println!("Server ready after {} attempts", attempt + 1);
-                            break;
-                        }
-                        thread::sleep(Duration::from_millis(200));
-                    }
-                    
-                    if server_ready {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let url = format!("http://127.0.0.1:{}", port);
-                            println!("Server ready, navigating to: {}", url);
-                            // Use eval to navigate to the new URL
-                            if let Err(e) = window.eval(&format!("window.location.href = '{}';", url)) {
-                                eprintln!("Failed to navigate to {}: {:?}", url, e);
-                                // Show error message if navigation fails
-                                let error_script = r#"
-                                    document.body.innerHTML = `
-                                        <div style="text-align: center; padding: 40px; color: #d32f2f;">
-                                            <h1>Navigation Error</h1>
-                                            <p>Failed to navigate to application.</p>
-                                            <p style="font-size: 12px; opacity: 0.7;">Please restart the application.</p>
-                                        </div>
-                                    `;
-                                "#;
-                                let _ = window.eval(error_script);
-                            }
-                        }
-                    } else {
-                        eprintln!("Error: Server did not become ready after {} attempts", max_attempts);
-                        // Show error message on loading screen
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let error_script = r#"
-                                document.body.innerHTML = `
-                                    <div style="text-align: center; padding: 40px; color: #d32f2f;">
-                                        <h1>Failed to Start Server</h1>
-                                        <p>The application server could not be started.</p>
-                                        <p style="font-size: 12px; opacity: 0.7;">Please restart the application or contact support.</p>
-                                    </div>
-                                `;
-                            "#;
-                            if let Err(e) = window.eval(error_script) {
-                                eprintln!("Failed to show error message: {:?}", e);
-                            }
-                        }
-                    }
-                });
-                Ok(())
-            });
-        
-        app.run(tauri::generate_context!())
-            .expect("error while running tauri application");
+        }
+        Ok(None) => {
+            // No master entry found, try migrating from old format
+        }
+        Err(e) => {
+            eprintln!("Failed to get master entry: {}", e);
+        }
     }
     
-    #[cfg(debug_assertions)]
-    {
-        tauri::Builder::default()
-            .plugin(tauri_plugin_shell::init())
-            .invoke_handler(tauri::generate_handler![
-                check_license_status,
-                initiate_purchase,
-                verify_receipt,
-                get_trial_start_date
-            ])
-            .run(tauri::generate_context!())
-            .expect("error while running tauri application");
+    // Migration: Try to load from old individual entries and consolidate
+    let mut all_connections = HashMap::new();
+    let mut migrated = false;
+    let connection_ids_clone = connection_ids.clone();
+    
+    for connection_id in &connection_ids {
+        let old_account = format!("connection_{}", connection_id);
+        match app.keyring().get_password(SERVICE_NAME, &old_account) {
+            Ok(Some(password)) => {
+                all_connections.insert(connection_id.clone(), password);
+                migrated = true;
+            }
+            _ => {}
+        }
     }
+    
+    // If we migrated, save to new format
+    if migrated && !all_connections.is_empty() {
+        let json_data = match serde_json::to_string(&all_connections) {
+            Ok(data) => data,
+            Err(e) => {
+                eprintln!("Failed to serialize during migration: {}", e);
+                return Ok(all_connections);
+            }
+        };
+        
+        // Save to master entry
+        if let Err(e) = app.keyring().set_password(SERVICE_NAME, MASTER_ACCOUNT, &json_data) {
+            eprintln!("Failed to save migrated data: {}", e);
+        } else {
+            // Delete old individual entries
+            for connection_id in &connection_ids_clone {
+                let old_account = format!("connection_{}", connection_id);
+                let _ = app.keyring().delete_password(SERVICE_NAME, &old_account);
+            }
+        }
+    }
+    
+    Ok(all_connections)
+}
+
+#[tauri::command]
+fn store_all_connection_strings(
+    app: tauri::AppHandle,
+    connection_strings: std::collections::HashMap<String, String>
+) -> Result<(), String> {
+    use tauri_plugin_keyring::KeyringExt;
+    use serde_json;
+    
+    const SERVICE_NAME: &str = "com.azureservicebusexplorer";
+    const MASTER_ACCOUNT: &str = "all_connections";
+    
+    // Store all connection strings as JSON in a single keychain entry
+    let json_data = serde_json::to_string(&connection_strings)
+        .map_err(|e| format!("Failed to serialize connection strings: {}", e))?;
+    
+    app.keyring()
+        .set_password(SERVICE_NAME, MASTER_ACCOUNT, &json_data)
+        .map_err(|e| format!("Failed to store connection strings in keychain: {}", e))?;
+    
+    Ok(())
+}
+
+// Azure Service Bus commands
+#[tauri::command]
+async fn list_queues(connection: ServiceBusConnection) -> Result<Vec<QueueProperties>, String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.list_queues().await
+}
+
+#[tauri::command]
+async fn get_queue(connection: ServiceBusConnection, queue_name: String) -> Result<QueueProperties, String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.get_queue(&queue_name).await
+}
+
+#[tauri::command]
+async fn create_queue(connection: ServiceBusConnection, queue_name: String, properties: Option<QueueProperties>) -> Result<(), String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.create_queue(&queue_name, properties.as_ref()).await
+}
+
+#[tauri::command]
+async fn update_queue(connection: ServiceBusConnection, queue_name: String, properties: QueueProperties) -> Result<(), String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.update_queue(&queue_name, &properties).await
+}
+
+#[tauri::command]
+async fn delete_queue(connection: ServiceBusConnection, queue_name: String) -> Result<(), String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.delete_queue(&queue_name).await
+}
+
+#[tauri::command]
+async fn list_topics(connection: ServiceBusConnection) -> Result<Vec<TopicProperties>, String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.list_topics().await
+}
+
+#[tauri::command]
+async fn get_topic(connection: ServiceBusConnection, topic_name: String) -> Result<TopicProperties, String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.get_topic(&topic_name).await
+}
+
+#[tauri::command]
+async fn create_topic(connection: ServiceBusConnection, topic_name: String, properties: Option<TopicProperties>) -> Result<(), String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.create_topic(&topic_name, properties.as_ref()).await
+}
+
+#[tauri::command]
+async fn update_topic(connection: ServiceBusConnection, topic_name: String, properties: TopicProperties) -> Result<(), String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.update_topic(&topic_name, &properties).await
+}
+
+#[tauri::command]
+async fn delete_topic(connection: ServiceBusConnection, topic_name: String) -> Result<(), String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.delete_topic(&topic_name).await
+}
+
+#[tauri::command]
+async fn list_subscriptions(connection: ServiceBusConnection, topic_name: String) -> Result<Vec<SubscriptionProperties>, String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.list_subscriptions(&topic_name).await
+}
+
+#[tauri::command]
+async fn create_subscription(connection: ServiceBusConnection, topic_name: String, subscription_name: String, properties: Option<SubscriptionProperties>) -> Result<(), String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.create_subscription(&topic_name, &subscription_name, properties.as_ref()).await
+}
+
+#[tauri::command]
+async fn peek_messages(
+    connection: ServiceBusConnection,
+    queue_name: Option<String>,
+    topic_name: Option<String>,
+    subscription_name: Option<String>,
+    max_count: u32,
+) -> Result<Vec<ServiceBusMessage>, String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.peek_messages(
+        queue_name.as_deref(),
+        topic_name.as_deref(),
+        subscription_name.as_deref(),
+        max_count,
+    ).await
+}
+
+#[tauri::command]
+async fn peek_dead_letter_messages(
+    connection: ServiceBusConnection,
+    queue_name: Option<String>,
+    topic_name: Option<String>,
+    subscription_name: Option<String>,
+    max_count: u32,
+) -> Result<Vec<ServiceBusMessage>, String> {
+    // For dead letter messages, we use the same peek but with a different path
+    // This is a simplified version - full implementation would handle dead letter queue path
+    let client = ServiceBusClient::create(&connection).await?;
+    client.peek_messages(
+        queue_name.as_deref(),
+        topic_name.as_deref(),
+        subscription_name.as_deref(),
+        max_count,
+    ).await
+}
+
+#[tauri::command]
+async fn send_message(
+    connection: ServiceBusConnection,
+    queue_name: Option<String>,
+    topic_name: Option<String>,
+    message: ServiceBusMessage,
+) -> Result<(), String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.send_message(
+        queue_name.as_deref(),
+        topic_name.as_deref(),
+        &message,
+    ).await
+}
+
+#[tauri::command]
+async fn purge_queue(connection: ServiceBusConnection, queue_name: String, purge_dead_letter: bool) -> Result<u32, String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.purge_queue(&queue_name, purge_dead_letter).await
+}
+
+#[tauri::command]
+async fn test_connection(connection: ServiceBusConnection) -> Result<bool, String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.test_connection().await
+}
+
+fn main() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_keyring::init())
+        .invoke_handler(tauri::generate_handler![
+            // License commands
+            check_license_status,
+            initiate_purchase,
+            verify_receipt,
+            get_trial_start_date,
+            // Keychain commands
+            store_connection_string,
+            get_connection_string,
+            delete_connection_string,
+            list_connection_ids,
+            get_all_connection_strings,
+            store_all_connection_strings,
+            // Azure Service Bus commands
+            list_queues,
+            get_queue,
+            create_queue,
+            update_queue,
+            delete_queue,
+            list_topics,
+            get_topic,
+            create_topic,
+            update_topic,
+            delete_topic,
+            list_subscriptions,
+            create_subscription,
+            peek_messages,
+            peek_dead_letter_messages,
+            send_message,
+            purge_queue,
+            test_connection,
+        ])
+        .setup(|_app| {
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }
 

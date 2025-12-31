@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core"
 import type {
   ServiceBusConnection,
   QueueProperties,
@@ -18,14 +19,39 @@ class ApiClient {
     if (typeof window === "undefined") return false
     return localStorage.getItem("demoMode") === "true"
   }
-  private getConnectionHeader(connection: ServiceBusConnection | null): HeadersInit {
-    if (!connection) {
-      throw new Error("No connection available")
-    }
+  
+  private transformConnectionForTauri(connection: ServiceBusConnection): any {
+    // Transform TypeScript camelCase to Rust snake_case
     return {
-      "Content-Type": "application/json",
-      "x-connection": JSON.stringify(connection),
+      id: connection.id,
+      name: connection.name,
+      connection_string: connection.connectionString,
+      namespace: connection.namespace,
+      use_azure_ad: connection.useAzureAD,
+      tenant_id: connection.tenantId,
+      client_id: connection.clientId,
+      created_at: connection.createdAt,
+      updated_at: connection.updatedAt,
     }
+  }
+
+  private async getConnectionWithString(connection: ServiceBusConnection | null): Promise<ServiceBusConnection | null> {
+    if (!connection) return null
+    
+    // If connection string is missing, try to load it from Keychain
+    if (!connection.connectionString && connection.id) {
+      try {
+        const { getConnectionString } = await import("@/lib/storage/connections")
+        const connStr = await getConnectionString(connection.id)
+        if (connStr) {
+          return { ...connection, connectionString: connStr }
+        }
+      } catch (error) {
+        console.warn("Failed to load connection string from Keychain:", error)
+      }
+    }
+    
+    return connection
   }
 
   async listQueues(connection: ServiceBusConnection | null): Promise<QueueProperties[]> {
@@ -34,15 +60,15 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 300))
       return [...MOCK_QUEUES]
     }
-    const response = await fetch("/api/queues", {
-      headers: this.getConnectionHeader(connection),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to fetch queues")
+    if (!connection) {
+      throw new Error("No connection available")
     }
-    const data = await response.json()
-    return data.queues
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    return await invoke<QueueProperties[]>("list_queues", { connection: tauriConnection })
   }
 
   async getQueue(connection: ServiceBusConnection | null, queueName: string): Promise<QueueProperties> {
@@ -54,15 +80,15 @@ class ApiClient {
       }
       return { ...queue }
     }
-    const response = await fetch(`/api/queues/${encodeURIComponent(queueName)}`, {
-      headers: this.getConnectionHeader(connection),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to fetch queue")
+    if (!connection) {
+      throw new Error("No connection available")
     }
-    const data = await response.json()
-    return data.queue
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    return await invoke<QueueProperties>("get_queue", { connection: tauriConnection, queueName })
   }
 
   async createQueue(
@@ -75,15 +101,15 @@ class ApiClient {
       // In demo mode, just simulate success
       return
     }
-    const response = await fetch("/api/queues/create", {
-      method: "POST",
-      headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ queueName, properties }),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to create queue")
+    if (!connection) {
+      throw new Error("No connection available")
     }
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    await invoke("create_queue", { connection: tauriConnection, queueName, properties })
   }
 
   async updateQueue(
@@ -95,15 +121,15 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 400))
       return
     }
-    const response = await fetch(`/api/queues/${encodeURIComponent(queueName)}`, {
-      method: "PUT",
-      headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ properties }),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to update queue")
+    if (!connection) {
+      throw new Error("No connection available")
     }
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    await invoke("update_queue", { connection: tauriConnection, queueName, properties })
   }
 
   async deleteQueue(connection: ServiceBusConnection | null, queueName: string): Promise<void> {
@@ -111,14 +137,15 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 300))
       return
     }
-    const response = await fetch(`/api/queues/${encodeURIComponent(queueName)}`, {
-      method: "DELETE",
-      headers: this.getConnectionHeader(connection),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to delete queue")
+    if (!connection) {
+      throw new Error("No connection available")
     }
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    await invoke("delete_queue", { connection: tauriConnection, queueName })
   }
 
   async listTopics(connection: ServiceBusConnection | null): Promise<TopicProperties[]> {
@@ -126,15 +153,15 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 300))
       return [...MOCK_TOPICS]
     }
-    const response = await fetch("/api/topics", {
-      headers: this.getConnectionHeader(connection),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to fetch topics")
+    if (!connection) {
+      throw new Error("No connection available")
     }
-    const data = await response.json()
-    return data.topics
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    return await invoke<TopicProperties[]>("list_topics", { connection: tauriConnection })
   }
 
   async getTopic(connection: ServiceBusConnection | null, topicName: string): Promise<TopicProperties> {
@@ -146,15 +173,15 @@ class ApiClient {
       }
       return { ...topic }
     }
-    const response = await fetch(`/api/topics/${encodeURIComponent(topicName)}`, {
-      headers: this.getConnectionHeader(connection),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to fetch topic")
+    if (!connection) {
+      throw new Error("No connection available")
     }
-    const data = await response.json()
-    return data.topic
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    return await invoke<TopicProperties>("get_topic", { connection: tauriConnection, topicName })
   }
 
   async createTopic(
@@ -166,15 +193,15 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 500))
       return
     }
-    const response = await fetch("/api/topics/create", {
-      method: "POST",
-      headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ topicName, properties }),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to create topic")
+    if (!connection) {
+      throw new Error("No connection available")
     }
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    await invoke("create_topic", { connection: tauriConnection, topicName, properties })
   }
 
   async updateTopic(
@@ -186,15 +213,15 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 400))
       return
     }
-    const response = await fetch(`/api/topics/${encodeURIComponent(topicName)}`, {
-      method: "PUT",
-      headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ properties }),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to update topic")
+    if (!connection) {
+      throw new Error("No connection available")
     }
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    await invoke("update_topic", { connection: tauriConnection, topicName, properties })
   }
 
   async deleteTopic(connection: ServiceBusConnection | null, topicName: string): Promise<void> {
@@ -202,14 +229,15 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 300))
       return
     }
-    const response = await fetch(`/api/topics/${encodeURIComponent(topicName)}`, {
-      method: "DELETE",
-      headers: this.getConnectionHeader(connection),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to delete topic")
+    if (!connection) {
+      throw new Error("No connection available")
     }
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    await invoke("delete_topic", { connection: tauriConnection, topicName })
   }
 
   async listSubscriptions(
@@ -220,15 +248,15 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 200))
       return [...(MOCK_SUBSCRIPTIONS[topicName] || [])]
     }
-    const response = await fetch(`/api/topics/${encodeURIComponent(topicName)}/subscriptions`, {
-      headers: this.getConnectionHeader(connection),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to fetch subscriptions")
+    if (!connection) {
+      throw new Error("No connection available")
     }
-    const data = await response.json()
-    return data.subscriptions
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    return await invoke<SubscriptionProperties[]>("list_subscriptions", { connection: tauriConnection, topicName })
   }
 
   async createSubscription(
@@ -241,15 +269,15 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 500))
       return
     }
-    const response = await fetch(`/api/topics/${encodeURIComponent(topicName)}/subscriptions/create`, {
-      method: "POST",
-      headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ subscriptionName, properties }),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to create subscription")
+    if (!connection) {
+      throw new Error("No connection available")
     }
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    await invoke("create_subscription", { connection: tauriConnection, topicName, subscriptionName, properties })
   }
 
   async peekMessages(
@@ -263,17 +291,21 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 400))
       return generateMockMessages(queueName, topicName, subscriptionName, false, maxCount)
     }
-    const response = await fetch("/api/messages/peek", {
-      method: "POST",
-      headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ queueName, topicName, subscriptionName, maxCount }),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to peek messages")
+    if (!connection) {
+      throw new Error("No connection available")
     }
-    const data = await response.json()
-    return data.messages
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    return await invoke<ServiceBusMessage[]>("peek_messages", {
+      connection: tauriConnection,
+      queueName,
+      topicName,
+      subscriptionName,
+      maxCount,
+    })
   }
 
   async peekDeadLetterMessages(
@@ -287,17 +319,21 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 400))
       return generateMockMessages(queueName, topicName, subscriptionName, true, maxCount)
     }
-    const response = await fetch("/api/messages/deadletter", {
-      method: "POST",
-      headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ queueName, topicName, subscriptionName, maxCount }),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to peek dead letter messages")
+    if (!connection) {
+      throw new Error("No connection available")
     }
-    const data = await response.json()
-    return data.messages
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    return await invoke<ServiceBusMessage[]>("peek_dead_letter_messages", {
+      connection: tauriConnection,
+      queueName,
+      topicName,
+      subscriptionName,
+      maxCount,
+    })
   }
 
   async sendMessage(
@@ -310,15 +346,15 @@ class ApiClient {
       // In demo mode, just simulate success
       return
     }
-    const response = await fetch("/api/messages/send", {
-      method: "POST",
-      headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ queueName, message }),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to send message")
+    if (!connection) {
+      throw new Error("No connection available")
     }
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    await invoke("send_message", { connection: tauriConnection, queueName, topicName: null, message })
   }
 
   async sendMessageToTopic(
@@ -330,15 +366,15 @@ class ApiClient {
       await new Promise(resolve => setTimeout(resolve, 500))
       return
     }
-    const response = await fetch("/api/messages/send", {
-      method: "POST",
-      headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ topicName, message }),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to send message")
+    if (!connection) {
+      throw new Error("No connection available")
     }
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    await invoke("send_message", { connection: tauriConnection, queueName: null, topicName, message })
   }
 
   async purgeQueue(
@@ -355,17 +391,65 @@ class ApiClient {
       }
       return 0
     }
-    const response = await fetch("/api/messages/purge", {
-      method: "POST",
-      headers: this.getConnectionHeader(connection),
-      body: JSON.stringify({ queueName, purgeDeadLetter }),
-    })
-    if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.error || "Failed to purge queue")
+    if (!connection) {
+      throw new Error("No connection available")
     }
-    const data = await response.json()
-    return data.purgedCount
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    return await invoke<number>("purge_queue", { connection: tauriConnection, queueName, purgeDeadLetter })
+  }
+
+  async testConnection(connection: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt">): Promise<boolean> {
+    if (this.isDemoMode()) {
+      // In demo mode, simulate a successful test
+      await new Promise(resolve => setTimeout(resolve, 500))
+      return true
+    }
+    
+    // For testing new connections, the connection string should already be in the connection object
+    // We don't need to load it from Keychain since it hasn't been saved yet
+    if (!connection.useAzureAD) {
+      if (!connection.connectionString || !connection.connectionString.trim()) {
+        throw new Error("Connection string is required")
+      }
+      // Basic validation: connection string should contain Endpoint=
+      if (!connection.connectionString.includes("Endpoint=")) {
+        throw new Error("Invalid connection string format. It must include 'Endpoint='.")
+      }
+    } else {
+      if (!connection.namespace || !connection.namespace.trim()) {
+        throw new Error("Namespace is required for Azure AD authentication")
+      }
+    }
+    
+    // Create a temporary connection object with required fields
+    const tempConnection: ServiceBusConnection = {
+      ...connection,
+      id: "temp-test",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    
+    try {
+      const tauriConnection = this.transformConnectionForTauri(tempConnection)
+      console.log("Testing connection:", { 
+        name: tauriConnection.name, 
+        hasConnectionString: !!tauriConnection.connection_string,
+        hasNamespace: !!tauriConnection.namespace,
+        useAzureAD: tauriConnection.use_azure_ad 
+      })
+      const result = await invoke<boolean>("test_connection", { connection: tauriConnection })
+      console.log("Test result:", result)
+      return result
+    } catch (error) {
+      console.error("Test connection error:", error)
+      // If invoke throws an error, it means the test failed
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      throw new Error(`Connection test failed: ${errorMessage}`)
+    }
   }
 }
 

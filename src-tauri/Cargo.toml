@@ -15,12 +15,23 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = { version = "2" }
+tauri-plugin-keyring = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 objc = "0.2"
 core-foundation = "0.9"
 reqwest = { version = "0.12", features = ["json", "blocking"] }
-base64 = "0.22"
+base64 = { version = "0.22", features = ["default"] }
+tokio = { version = "1", features = ["full"] }
+azure_core = "0.19"
+azure_identity = "0.19"
+chrono = { version = "0.4", features = ["serde"] }
+hmac = "0.12"
+sha2 = "0.10"
+url = "2.5"
+regex = "1.10"
+urlencoding = "2.1"
+serde-xml-rs = "0.6"
 
 [profile.release]
 # Include debug symbols for Xcode dSYM generation

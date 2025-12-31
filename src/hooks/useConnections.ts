@@ -35,8 +35,12 @@ export function useConnections() {
   }, [pathname])
 
   // Function to update connections based on demo mode
-  const updateConnectionsForDemoMode = useCallback(() => {
-    const loaded = loadConnections()
+  const updateConnectionsForDemoMode = useCallback(async () => {
+    // Run migration on first load
+    const { migrateConnectionsToKeychain } = await import("@/lib/storage/connections")
+    await migrateConnectionsToKeychain()
+    
+    const loaded = await loadConnections()
     
     // In demo mode, ensure mock connection exists
     let connectionsToUse = loaded
@@ -45,7 +49,7 @@ export function useConnections() {
       if (!hasDemoConnection) {
         // Add demo connection if it doesn't exist
         connectionsToUse = [MOCK_CONNECTION, ...loaded]
-        addConnectionStorage(MOCK_CONNECTION)
+        await addConnectionStorage(MOCK_CONNECTION)
       } else {
         // Update demo connection to ensure it's first
         connectionsToUse = [MOCK_CONNECTION, ...loaded.filter(c => c.id !== MOCK_CONNECTION.id)]
@@ -76,7 +80,7 @@ export function useConnections() {
       }
       
       // If no URL connection, load saved connection ID from localStorage
-      const savedConnectionId = loadCurrentConnectionId()
+      const savedConnectionId = await loadCurrentConnectionId()
       if (savedConnectionId && connectionsToUse.some((c) => c.id === savedConnectionId)) {
         setCurrentConnectionId(savedConnectionId)
       } else {
@@ -126,56 +130,40 @@ export function useConnections() {
     }
   }, [currentConnectionId, getConnectionNameFromUrl])
 
-  const addConnection = useCallback((connection: ServiceBusConnection) => {
-    addConnectionStorage(connection)
-    setConnections((prev) => [...prev, connection])
+  const addConnection = useCallback(async (connection: ServiceBusConnection) => {
+    await addConnectionStorage(connection)
+    // Reload connections to ensure consistency
+    await updateConnectionsForDemoMode()
     if (!currentConnectionId) {
       setCurrentConnectionId(connection.id)
     }
-  }, [currentConnectionId])
+  }, [currentConnectionId, updateConnectionsForDemoMode])
 
-  const updateConnection = useCallback((connectionId: string, updates: Partial<ServiceBusConnection>) => {
-    updateConnectionStorage(connectionId, updates)
+  const updateConnection = useCallback(async (connectionId: string, updates: Partial<ServiceBusConnection>) => {
+    await updateConnectionStorage(connectionId, updates)
     setConnections((prev) =>
       prev.map((c) => (c.id === connectionId ? { ...c, ...updates, updatedAt: Date.now() } : c))
     )
   }, [])
 
-  const removeConnection = useCallback((connectionId: string) => {
+  const removeConnection = useCallback(async (connectionId: string) => {
     // Don't allow deleting the demo connection if demo mode is active
     if (isDemoMode && connectionId === MOCK_CONNECTION.id) {
       console.log("Cannot delete demo connection while demo mode is active")
-      return
+      throw new Error("Cannot delete demo connection while demo mode is active")
     }
     
-    console.log("Removing connection from storage:", connectionId)
-    deleteConnectionStorage(connectionId)
-    
-    setConnections((prev) => {
-      console.log("Previous connections:", prev.map(c => c.id))
-      const filtered = prev.filter((c) => c.id !== connectionId)
-      console.log("Filtered connections:", filtered.map(c => c.id))
+    try {
+      console.log("Removing connection from storage:", connectionId)
+      await deleteConnectionStorage(connectionId)
       
-      if (currentConnectionId === connectionId) {
-        if (filtered.length > 0) {
-          setCurrentConnectionId(filtered[0].id)
-        } else {
-          setCurrentConnectionId(null)
-          saveCurrentConnectionId(null)
-        }
-      }
-      // If demo mode is active and we removed a non-demo connection, ensure demo connection is still first
-      if (isDemoMode && filtered.some(c => c.id === MOCK_CONNECTION.id)) {
-        const demoConnection = filtered.find(c => c.id === MOCK_CONNECTION.id)
-        const otherConnections = filtered.filter(c => c.id !== MOCK_CONNECTION.id)
-        const result = demoConnection ? [demoConnection, ...otherConnections] : filtered
-        console.log("Final connections (with demo first):", result.map(c => c.id))
-        return result
-      }
-      console.log("Final connections:", filtered.map(c => c.id))
-      return filtered
-    })
-  }, [currentConnectionId, isDemoMode])
+      // Reload connections from storage to ensure consistency
+      await updateConnectionsForDemoMode()
+    } catch (error) {
+      console.error("Failed to remove connection:", error)
+      throw error
+    }
+  }, [isDemoMode, updateConnectionsForDemoMode])
 
   const currentConnection = connections.find((c) => c.id === currentConnectionId) || null
 

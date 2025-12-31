@@ -78,59 +78,65 @@ mod macos {
     }
     
     fn verify_with_endpoint(endpoint: &str, body: &serde_json::Value) -> Result<bool, String> {
-        let client = reqwest::blocking::Client::new();
-        let response = client
-            .post(endpoint)
-            .json(body)
-            .send()
-            .map_err(|e| format!("Request failed: {}", e))?;
+        // Use tokio runtime for async reqwest calls
+        let rt = tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {}", e))?;
+        rt.block_on(async {
+            let client = reqwest::Client::new();
+            let response = client
+                .post(endpoint)
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| format!("Request failed: {}", e))?;
+            
+            let status: serde_json::Value = response
+                .json()
+                .await
+                .map_err(|e| format!("Failed to parse response: {}", e))?;
         
-        let status: serde_json::Value = response
-            .json()
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-        
-        // Check response status
-        let status_code = status["status"]
-            .as_i64()
-            .ok_or("Invalid status code in response")?;
-        
-        // Status codes:
-        // 0 = valid
-        // 21007 = receipt is from sandbox, should use sandbox endpoint
-        // 21008 = receipt is from production, should use production endpoint
-        // Other codes = invalid
-        
-        match status_code {
-            0 => {
-                // Valid receipt - check for our product
-                if let Some(receipt) = status.get("receipt") {
-                    if let Some(in_app) = receipt.get("in_app") {
-                        if let Some(transactions) = in_app.as_array() {
-                            for transaction in transactions {
-                                if let Some(product_id) = transaction.get("product_id") {
-                                    if product_id.as_str() == Some(PRODUCT_ID) {
-                                        return Ok(true);
+            // Check response status
+            let status_code = status["status"]
+                .as_i64()
+                .ok_or("Invalid status code in response")?;
+            
+            // Status codes:
+            // 0 = valid
+            // 21007 = receipt is from sandbox, should use sandbox endpoint
+            // 21008 = receipt is from production, should use production endpoint
+            // Other codes = invalid
+            
+            match status_code {
+                0 => {
+                    // Valid receipt - check for our product
+                    if let Some(receipt) = status.get("receipt") {
+                        if let Some(in_app) = receipt.get("in_app") {
+                            if let Some(transactions) = in_app.as_array() {
+                                for transaction in transactions {
+                                    if let Some(product_id) = transaction.get("product_id") {
+                                        if product_id.as_str() == Some(PRODUCT_ID) {
+                                            return Ok(true);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                    // Receipt valid but product not found
+                    Ok(false)
                 }
-                // Receipt valid but product not found
-                Ok(false)
+                21007 => {
+                    // Receipt is from sandbox - caller should retry with sandbox endpoint
+                    Ok(false)
+                }
+                21008 => {
+                    // Receipt is from production - caller should retry with production endpoint
+                    Ok(false)
+                }
+                _ => {
+                    Err(format!("Receipt verification failed with status: {}", status_code))
+                }
             }
-            21007 => {
-                // Receipt is from sandbox - caller should retry with sandbox endpoint
-                Ok(false)
-            }
-            21008 => {
-                // Receipt is from production - caller should retry with production endpoint
-                Ok(false)
-            }
-            _ => {
-                Err(format!("Receipt verification failed with status: {}", status_code))
-            }
-        }
+        })
     }
 
     /// Check if the app was purchased via App Store

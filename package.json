@@ -6,13 +6,11 @@
     "dev": "next dev -p 1420",
     "build": "next build",
     "start": "next start -p 1420",
-    "start:tauri": "node start-server.js",
     "lint": "eslint",
-    "bundle:nodejs": "./scripts/bundle-nodejs.sh",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "npm run bundle:nodejs && tauri build",
-    "tauri:build:appstore": "npm run bundle:nodejs && tauri build --bundles app --target universal-apple-darwin --config src-tauri/tauri.appstore.conf.json"
+    "tauri:build": "tauri build",
+    "tauri:build:appstore": "tauri build --bundles app --target universal-apple-darwin --config src-tauri/tauri.appstore.conf.json"
   },
   "dependencies": {
     "@azure/identity": "^4.13.0",
