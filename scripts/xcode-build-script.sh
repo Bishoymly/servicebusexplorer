@@ -5,9 +5,9 @@
 
 set -e
 
-# Path to the Tauri-built app (adjust relative path as needed)
-# If Xcode project is in a different location, update this path
-TAURI_APP="${SRCROOT}/../src-tauri/target/universal-apple-darwin/release/bundle/macos/Azure Service Bus Explorer.app"
+# Path to the Tauri-built app
+# SRCROOT is xcode/azureservicebusexplorer/, so go up 2 levels to repo root
+TAURI_APP="${SRCROOT}/../../src-tauri/target/universal-apple-darwin/release/bundle/macos/Azure Service Bus Explorer.app"
 
 # Xcode output app path
 XCODE_APP="${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app"

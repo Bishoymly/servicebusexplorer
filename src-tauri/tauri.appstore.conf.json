@@ -46,7 +46,7 @@
         "embedded.provisionprofile": "embedded.provisionprofile"
       },
       "frameworks": [],
-      "minimumSystemVersion": "10.13",
+      "minimumSystemVersion": "11.0",
       "exceptionDomain": null
     }
   },

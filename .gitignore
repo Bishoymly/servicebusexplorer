@@ -45,6 +45,14 @@ src-tauri/target/
 src-tauri/WixTools/
 *.provisionprofile
 
+# bundled node.js (downloaded during build)
+src-tauri/target/resources/nodejs/
+
 # app store build outputs
 dist/appstore/
 *.pkg
+
+# xcode - ignore user-specific data but allow project files
+xcode/**/xcuserdata/
+xcode/**/*.xcuserstate
+xcode/**/*.xcuserdatad
