@@ -121,12 +121,12 @@ const TreeNodeComponent: React.FC<{
         ) : (
           <span className="w-4" />
         )}
-        {node.icon && <span className="mr-1">{node.icon}</span>}
+        {node.icon && <span className="mr-2">{node.icon}</span>}
         <span className="flex-1 truncate">{node.label}</span>
         <span className="ml-auto flex items-center gap-1">
           {node.actions && (
             <span 
-              className="opacity-0 group-hover:opacity-100 transition-opacity"
+              className="opacity-0 group-hover:opacity-100 transition-opacity mr-2"
             >
               {node.actions}
             </span>
@@ -134,7 +134,7 @@ const TreeNodeComponent: React.FC<{
           {node.refreshAction && (
             <span 
               className={cn(
-                "transition-opacity",
+                "transition-opacity mr-2",
                 node.isLoading ? "opacity-100" : "opacity-0 group-hover:opacity-100"
               )}
             >
@@ -230,7 +230,7 @@ export function Tree({ nodes, expanded, onToggle, onSelect, onBadgeClick, select
   }, [searchTerm, filteredNodes])
 
   return (
-    <div className={cn("", className)}>
+    <div className={cn("pr-4", className)}>
       {filteredNodes.map((node) => (
         <TreeNodeComponent
           key={node.id}

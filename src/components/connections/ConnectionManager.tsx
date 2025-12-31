@@ -46,9 +46,9 @@ export function ConnectionManager() {
     setFormOpen(true)
   }
 
-  const handleSubmit = (data: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt">) => {
+  const handleSubmit = async (data: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt">) => {
     if (editingConnection) {
-      updateConnection(editingConnection.id, data)
+      await updateConnection(editingConnection.id, data)
     } else {
       const newConnection: ServiceBusConnection = {
         ...data,
@@ -56,7 +56,7 @@ export function ConnectionManager() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       }
-      addConnection(newConnection)
+      await addConnection(newConnection)
     }
     setFormOpen(false)
     setEditingConnection(undefined)

@@ -13,7 +13,7 @@ import type { ServiceBusConnection } from "@/types/azure"
 interface ConnectionFormProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSubmit: (connection: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt">) => void
+  onSubmit: (connection: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt">) => Promise<void>
   initialData?: ServiceBusConnection
 }
 
@@ -175,7 +175,8 @@ export function ConnectionForm({ open, onOpenChange, onSubmit, initialData }: Co
       // Test passed - proceed with adding/updating
       setTestResult({ success: true, message: "Connection test successful! Saving..." })
       
-      onSubmit({
+      // Await the onSubmit to ensure connection is saved before closing
+      await onSubmit({
         name,
         connectionString: useAzureAD ? undefined : connectionString,
         namespace: useAzureAD ? namespace : undefined,
@@ -184,7 +185,7 @@ export function ConnectionForm({ open, onOpenChange, onSubmit, initialData }: Co
         clientId: useAzureAD ? clientId : undefined,
       })
       
-      // Close dialog and reset form
+      // Close dialog and reset form only after successful submission
       onOpenChange(false)
       setName("")
       setUseAzureAD(false)

@@ -38,7 +38,7 @@ export function useTreeData(
   onCreateTopic?: (connectionId: string) => void,
   onCreateSubscription?: (connectionId: string, topicName: string) => void
 ) {
-  const { connections, currentConnectionId, removeConnection } = useConnections()
+  const { connections, connectionsVersion, currentConnectionId, removeConnection } = useConnections()
   const [connectionData, setConnectionData] = useState<Record<string, ConnectionTreeData>>({})
   const [loading, setLoading] = useState<Record<string, boolean>>({})
   const [connectionErrors, setConnectionErrors] = useState<Record<string, boolean>>({})
@@ -132,8 +132,23 @@ export function useTreeData(
     loadedConnectionsRef.current.forEach(id => {
       if (!currentIds.has(id)) {
         loadedConnectionsRef.current.delete(id)
-        // Also clean up the data
+        // Also clean up the data and related state
         setConnectionData(prev => {
+          const next = { ...prev }
+          delete next[id]
+          return next
+        })
+        setLoading(prev => {
+          const next = { ...prev }
+          delete next[id]
+          return next
+        })
+        setConnectionErrors(prev => {
+          const next = { ...prev }
+          delete next[id]
+          return next
+        })
+        setSortPreferences(prev => {
           const next = { ...prev }
           delete next[id]
           return next
@@ -246,7 +261,7 @@ export function useTreeData(
     loadConnectionData(connectionId)
   }, [loadConnectionData])
 
-  const buildTreeNodes = useCallback((searchTerm?: string): TreeNode[] => {
+  const treeNodes = React.useMemo(() => {
     return connections.map(connection => {
       const data = connectionData[connection.id] || { queues: [], topics: [], subscriptions: {} }
       const prefs = sortPreferences[connection.id] || {}
@@ -270,11 +285,9 @@ export function useTreeData(
 
       const queueNodes: TreeNode[] = sortedQueues.map(queue => {
         const badges: React.ReactNode[] = []
-        // Show active message count first
         if (queue.activeMessageCount !== undefined && queue.activeMessageCount > 0) {
           badges.push(React.createElement(Badge, { key: "count", variant: "secondary", className: "h-4 px-1 text-xs" }, queue.activeMessageCount))
         }
-        // Show dead letter count without "DL:" prefix, make it clickable
         if (queue.deadLetterMessageCount !== undefined && queue.deadLetterMessageCount > 0) {
           badges.push(React.createElement(
             "div",
@@ -289,7 +302,6 @@ export function useTreeData(
             }, queue.deadLetterMessageCount)
           ))
         }
-        // Show scheduled count
         if (queue.scheduledMessageCount !== undefined && queue.scheduledMessageCount > 0) {
           badges.push(React.createElement(Badge, { key: "scheduled", variant: "outline", className: "h-4 px-1 text-xs" }, `S: ${queue.scheduledMessageCount}`))
         }
@@ -317,7 +329,6 @@ export function useTreeData(
       const topicNodes: TreeNode[] = sortedTopics.map(topic => {
         const subs = data.subscriptions[topic.name] || []
         
-        // Sort subscriptions
         const sortedSubs = [...subs].sort((a, b) => {
           switch (subscriptionSort) {
             case "name":
@@ -335,11 +346,9 @@ export function useTreeData(
         
         const subscriptionNodes: TreeNode[] = sortedSubs.map(sub => {
           const badges: React.ReactNode[] = []
-          // Show active message count first
           if (sub.activeMessageCount !== undefined && sub.activeMessageCount > 0) {
             badges.push(React.createElement(Badge, { key: "count", variant: "secondary", className: "h-4 px-1 text-xs" }, sub.activeMessageCount))
           }
-          // Show dead letter count without "DL:" prefix
           if (sub.deadLetterMessageCount !== undefined && sub.deadLetterMessageCount > 0) {
             badges.push(React.createElement(
               "div",
@@ -354,7 +363,6 @@ export function useTreeData(
               }, sub.deadLetterMessageCount)
             ))
           }
-          // Show scheduled/transfer count
           if (sub.transferMessageCount !== undefined && sub.transferMessageCount > 0) {
             badges.push(React.createElement(Badge, { key: "scheduled", variant: "outline", className: "h-4 px-1 text-xs" }, `S: ${sub.transferMessageCount}`))
           }
@@ -564,7 +572,6 @@ export function useTreeData(
         if (onDeleteRequest) {
           onDeleteRequest(connectionId, connectionName)
         } else {
-          // Fallback to direct deletion if no callback provided
           removeConnection(connectionId)
           onConnectionRemoved?.(connectionId)
         }
@@ -619,9 +626,7 @@ export function useTreeData(
         hasError,
       }
     })
-  }, [connections, connectionData, currentConnectionId, sortPreferences, handleRefreshQueues, handleRefreshTopics, handleSortChange, removeConnection, refreshConnection, loading, connectionErrors, onConnectionRemoved, onDeleteRequest, onCreateQueue, onCreateTopic, onCreateSubscription])
-
-  const treeNodes = React.useMemo(() => buildTreeNodes(), [buildTreeNodes])
+  }, [connections, connections.length, connectionsVersion, connectionData, sortPreferences, loading, connectionErrors, handleRefreshQueues, handleRefreshTopics, handleSortChange, removeConnection, refreshConnection, onConnectionRemoved, onDeleteRequest, onCreateQueue, onCreateTopic, onCreateSubscription])
 
   return {
     treeNodes,

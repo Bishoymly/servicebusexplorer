@@ -20,19 +20,10 @@ class ApiClient {
     return localStorage.getItem("demoMode") === "true"
   }
   
-  private transformConnectionForTauri(connection: ServiceBusConnection): any {
-    // Transform TypeScript camelCase to Rust snake_case
-    return {
-      id: connection.id,
-      name: connection.name,
-      connection_string: connection.connectionString,
-      namespace: connection.namespace,
-      use_azure_ad: connection.useAzureAD,
-      tenant_id: connection.tenantId,
-      client_id: connection.clientId,
-      created_at: connection.createdAt,
-      updated_at: connection.updatedAt,
-    }
+  // No longer needed - Rust struct now accepts camelCase directly via serde rename_all
+  // Keeping for backwards compatibility but it just returns the connection as-is
+  private transformConnectionForTauri(connection: ServiceBusConnection): ServiceBusConnection {
+    return connection
   }
 
   private async getConnectionWithString(connection: ServiceBusConnection | null): Promise<ServiceBusConnection | null> {

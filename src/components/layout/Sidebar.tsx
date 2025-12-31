@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import Image from "next/image"
 import { Plus, Search } from "lucide-react"
 import { useRouter, usePathname } from "next/navigation"
@@ -22,7 +22,7 @@ import type { ServiceBusConnection } from "@/types/azure"
 export function Sidebar() {
   const router = useRouter()
   const pathname = usePathname()
-  const { connections, addConnection, removeConnection } = useConnections()
+  const { connections, connectionsVersion, addConnection, removeConnection } = useConnections()
   const { selectedResource, setSelectedResource } = useSelectedResource()
   const { isDemoMode, toggleDemoMode } = useDemoMode()
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -232,6 +232,39 @@ export function Sidebar() {
   useEffect(() => {
     const currentConnectionIds = new Set(connections.map(c => c.id))
     
+    // Clean up expanded state for removed connections
+    const removedConnectionIds = Array.from(previousConnectionsRef.current).filter(
+      id => !currentConnectionIds.has(id)
+    )
+    
+    if (removedConnectionIds.length > 0) {
+      setExpanded(prev => {
+        const next = new Set(prev)
+        // Remove all expanded nodes related to deleted connections
+        removedConnectionIds.forEach(connectionId => {
+          // Remove connection node
+          next.delete(`connection-${connectionId}`)
+          // Remove queues header
+          next.delete(`queues-${connectionId}`)
+          // Remove topics header
+          next.delete(`topics-${connectionId}`)
+          // Remove all queue nodes
+          treeNodes.forEach(node => {
+            if (node.data?.type === "queue" && node.data?.connection?.id === connectionId) {
+              next.delete(node.id)
+            }
+            if (node.data?.type === "topic" && node.data?.connection?.id === connectionId) {
+              next.delete(node.id)
+            }
+            if (node.data?.type === "subscription" && node.data?.connection?.id === connectionId) {
+              next.delete(node.id)
+            }
+          })
+        })
+        return next
+      })
+    }
+    
     // Check if there are new connections
     const hasNewConnections = Array.from(currentConnectionIds).some(id => !previousConnectionsRef.current.has(id))
     
@@ -333,6 +366,7 @@ export function Sidebar() {
           </div>
         ) : (
           <Tree
+            key={`connections-${connectionsVersion}`}
             nodes={treeNodes}
             expanded={expanded}
             onToggle={(id) => {

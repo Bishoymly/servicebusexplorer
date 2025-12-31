@@ -332,6 +332,99 @@ fn store_all_connection_strings(
     Ok(())
 }
 
+// New commands to store full connection objects in Keychain
+#[tauri::command]
+fn store_connection(
+    app: tauri::AppHandle,
+    connection: ServiceBusConnection
+) -> Result<(), String> {
+    use tauri_plugin_keyring::KeyringExt;
+    use std::collections::HashMap;
+    use serde_json;
+    
+    const SERVICE_NAME: &str = "com.azureservicebusexplorer";
+    const CONNECTIONS_ACCOUNT: &str = "all_connection_objects";
+    
+    // Load existing connections
+    let mut all_connections: HashMap<String, ServiceBusConnection> = match app.keyring().get_password(SERVICE_NAME, CONNECTIONS_ACCOUNT) {
+        Ok(Some(json_data)) => {
+            serde_json::from_str(&json_data).unwrap_or_else(|_| HashMap::new())
+        }
+        _ => HashMap::new()
+    };
+    
+    // Update/add the new connection
+    all_connections.insert(connection.id.clone(), connection);
+    
+    // Store all connections back as JSON
+    let json_data = serde_json::to_string(&all_connections)
+        .map_err(|e| format!("Failed to serialize connections: {}", e))?;
+    
+    app.keyring()
+        .set_password(SERVICE_NAME, CONNECTIONS_ACCOUNT, &json_data)
+        .map_err(|e| format!("Failed to store connection in keychain: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+fn get_all_connections(
+    app: tauri::AppHandle
+) -> Result<Vec<ServiceBusConnection>, String> {
+    use tauri_plugin_keyring::KeyringExt;
+    use std::collections::HashMap;
+    use serde_json;
+    
+    const SERVICE_NAME: &str = "com.azureservicebusexplorer";
+    const CONNECTIONS_ACCOUNT: &str = "all_connection_objects";
+    
+    // Load all connections from single keychain entry
+    match app.keyring().get_password(SERVICE_NAME, CONNECTIONS_ACCOUNT) {
+        Ok(Some(json_data)) => {
+            let all_connections: HashMap<String, ServiceBusConnection> = serde_json::from_str(&json_data)
+                .map_err(|e| format!("Failed to parse connections: {}", e))?;
+            
+            Ok(all_connections.into_values().collect())
+        }
+        Ok(None) => Ok(Vec::new()),
+        Err(e) => Err(format!("Failed to get connections from keychain: {}", e))
+    }
+}
+
+#[tauri::command]
+fn delete_connection(
+    app: tauri::AppHandle,
+    connection_id: String
+) -> Result<(), String> {
+    use tauri_plugin_keyring::KeyringExt;
+    use std::collections::HashMap;
+    use serde_json;
+    
+    const SERVICE_NAME: &str = "com.azureservicebusexplorer";
+    const CONNECTIONS_ACCOUNT: &str = "all_connection_objects";
+    
+    // Load existing connections
+    let mut all_connections: HashMap<String, ServiceBusConnection> = match app.keyring().get_password(SERVICE_NAME, CONNECTIONS_ACCOUNT) {
+        Ok(Some(json_data)) => {
+            serde_json::from_str(&json_data).unwrap_or_else(|_| HashMap::new())
+        }
+        _ => HashMap::new()
+    };
+    
+    // Remove the connection
+    all_connections.remove(&connection_id);
+    
+    // Store updated connections back
+    let json_data = serde_json::to_string(&all_connections)
+        .map_err(|e| format!("Failed to serialize connections: {}", e))?;
+    
+    app.keyring()
+        .set_password(SERVICE_NAME, CONNECTIONS_ACCOUNT, &json_data)
+        .map_err(|e| format!("Failed to update connections in keychain: {}", e))?;
+    
+    Ok(())
+}
+
 // Azure Service Bus commands
 #[tauri::command]
 async fn list_queues(connection: ServiceBusConnection) -> Result<Vec<QueueProperties>, String> {
@@ -478,13 +571,17 @@ fn main() {
             initiate_purchase,
             verify_receipt,
             get_trial_start_date,
-            // Keychain commands
+            // Keychain commands (legacy - for connection strings only)
             store_connection_string,
             get_connection_string,
             delete_connection_string,
             list_connection_ids,
             get_all_connection_strings,
             store_all_connection_strings,
+            // Keychain commands (new - for full connection objects)
+            store_connection,
+            get_all_connections,
+            delete_connection,
             // Azure Service Bus commands
             list_queues,
             get_queue,

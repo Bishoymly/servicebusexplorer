@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { SelectedResourceProvider } from "@/contexts/SelectedResourceContext"
 import { TreeRefreshProvider } from "@/contexts/TreeRefreshContext"
 import { DemoModeProvider } from "@/contexts/DemoModeContext"
+import { ConnectionsProvider } from "@/contexts/ConnectionsContext"
 import { LicenseProvider } from "@/contexts/LicenseContext"
 import { TrialBanner } from "@/components/license/TrialBanner"
 import { LicenseGate } from "@/components/license/LicenseGate"
@@ -39,7 +40,8 @@ export default function RootLayout({
           <LicenseTestHelper />
           <SelectedResourceProvider>
             <DemoModeProvider>
-              <LicenseGate>
+              <ConnectionsProvider>
+                <LicenseGate>
                 <div className="flex h-screen flex-col overflow-hidden">
                   <TrialBanner />
                   <div className="flex flex-1 overflow-hidden">
@@ -47,7 +49,8 @@ export default function RootLayout({
                     <main className="flex-1 overflow-hidden">{children}</main>
                   </div>
                 </div>
-              </LicenseGate>
+                </LicenseGate>
+              </ConnectionsProvider>
             </DemoModeProvider>
           </SelectedResourceProvider>
         </LicenseProvider>

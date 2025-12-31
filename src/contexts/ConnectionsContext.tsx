@@ -1,16 +1,38 @@
 "use client"
 
-// Re-export from context for backwards compatibility
-export { useConnections } from "@/contexts/ConnectionsContext"
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react"
+import { usePathname } from "next/navigation"
+import type { ServiceBusConnection } from "@/types/azure"
+import {
+  loadConnections,
+  addConnection as addConnectionStorage,
+  updateConnection as updateConnectionStorage,
+  deleteConnection as deleteConnectionStorage,
+  loadCurrentConnectionId,
+  saveCurrentConnectionId,
+} from "@/lib/storage/connections"
+import { MOCK_CONNECTION } from "@/lib/demo/mockData"
+import { useDemoMode } from "@/contexts/DemoModeContext"
 
-// Old implementation kept for reference but not used
-/*
-export function useConnections_OLD() {
+interface ConnectionsContextType {
+  connections: ServiceBusConnection[]
+  connectionsVersion: number
+  currentConnection: ServiceBusConnection | null
+  currentConnectionId: string | null
+  setCurrentConnectionId: (id: string | null) => void
+  addConnection: (connection: ServiceBusConnection) => Promise<void>
+  updateConnection: (connectionId: string, updates: Partial<ServiceBusConnection>) => Promise<void>
+  removeConnection: (connectionId: string) => Promise<void>
+  loading: boolean
+}
+
+const ConnectionsContext = createContext<ConnectionsContextType | undefined>(undefined)
+
+export function ConnectionsProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const { isDemoMode } = useDemoMode()
   const [connections, setConnections] = useState<ServiceBusConnection[]>([])
   const [connectionsVersion, setConnectionsVersion] = useState(0)
-  // Always start with null to avoid hydration mismatch
   const [currentConnectionId, setCurrentConnectionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const reloadingRef = useRef(false)
@@ -18,7 +40,6 @@ export function useConnections_OLD() {
   // Extract connection name from URL if present
   const getConnectionNameFromUrl = useCallback(() => {
     if (!pathname || pathname === "/") return null
-    // Match patterns like /DEV/queues or /DEV/topics
     const match = pathname.match(/^\/([^/]+)\/(queues|topics)/)
     if (match) {
       return decodeURIComponent(match[1])
@@ -27,59 +48,42 @@ export function useConnections_OLD() {
   }, [pathname])
 
   // Reload connections from storage and update state
-  // Handles demo mode filtering and current connection selection
   const reloadConnections = useCallback(async () => {
-    // Prevent multiple simultaneous reloads
     if (reloadingRef.current) {
       return
     }
     reloadingRef.current = true
     
     try {
-      // Run migration on first load
       const { migrateConnectionsToKeychain } = await import("@/lib/storage/connections")
       await migrateConnectionsToKeychain()
       
       const loaded = await loadConnections()
       
-      // In demo mode, ensure mock connection exists
       let connectionsToUse: ServiceBusConnection[]
       if (isDemoMode) {
         const hasDemoConnection = loaded.some(c => c.id === MOCK_CONNECTION.id)
         if (!hasDemoConnection) {
-          // Add demo connection if it doesn't exist
           connectionsToUse = [MOCK_CONNECTION, ...loaded]
           await addConnectionStorage(MOCK_CONNECTION)
         } else {
-          // Update demo connection to ensure it's first
           connectionsToUse = [MOCK_CONNECTION, ...loaded.filter(c => c.id !== MOCK_CONNECTION.id)]
         }
       } else {
-        // Remove demo connection if demo mode is disabled
         connectionsToUse = loaded.filter(c => c.id !== MOCK_CONNECTION.id)
       }
       
-      // Always create a new array reference to ensure React detects the change
-      // Create a completely new array with new object references to ensure React detects the change
       const newConnections = connectionsToUse.map(c => ({ ...c }))
-      console.log("reloadConnections: setting connections in state, count:", newConnections.length, "ids:", newConnections.map(c => c.id))
       setConnections(newConnections)
-      // Increment version to force re-renders in components that depend on connections
-      setConnectionsVersion(prev => {
-        const next = prev + 1
-        console.log("reloadConnections: incrementing version to", next)
-        return next
-      })
+      setConnectionsVersion(prev => prev + 1)
       
       if (connectionsToUse.length > 0) {
-        // In demo mode, always use demo connection
         if (isDemoMode) {
           setCurrentConnectionId(MOCK_CONNECTION.id)
           saveCurrentConnectionId(MOCK_CONNECTION.id)
           return
         }
         
-        // First, check if URL contains a connection name
         const urlConnectionName = getConnectionNameFromUrl()
         if (urlConnectionName) {
           const urlConnection = connectionsToUse.find((c) => c.name === urlConnectionName)
@@ -89,12 +93,10 @@ export function useConnections_OLD() {
           }
         }
         
-        // If no URL connection, load saved connection ID from localStorage
         const savedConnectionId = await loadCurrentConnectionId()
         if (savedConnectionId && connectionsToUse.some((c) => c.id === savedConnectionId)) {
           setCurrentConnectionId(savedConnectionId)
         } else {
-          // Default to first connection if no saved ID or saved ID doesn't exist
           setCurrentConnectionId(connectionsToUse[0].id)
         }
       } else {
@@ -105,7 +107,7 @@ export function useConnections_OLD() {
     }
   }, [isDemoMode, getConnectionNameFromUrl])
 
-  // Initial load - only run once on mount
+  // Initial load
   useEffect(() => {
     let mounted = true
     reloadConnections().then(() => {
@@ -116,18 +118,16 @@ export function useConnections_OLD() {
     return () => {
       mounted = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // Empty deps - only run on mount
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update connections when demo mode changes
   useEffect(() => {
     if (!loading) {
       reloadConnections()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDemoMode]) // Only depend on isDemoMode, not loading
+  }, [isDemoMode, loading, reloadConnections])
 
-  // Sync connection ID with URL when pathname changes (priority over localStorage)
+  // Sync connection ID with URL when pathname changes
   useEffect(() => {
     if (loading || connections.length === 0) return
     
@@ -136,32 +136,22 @@ export function useConnections_OLD() {
       const urlConnection = connections.find((c) => c.name === urlConnectionName)
       if (urlConnection && urlConnection.id !== currentConnectionId) {
         setCurrentConnectionId(urlConnection.id)
-        // Also save to localStorage so it persists
         saveCurrentConnectionId(urlConnection.id)
       }
     }
-  }, [pathname, connections, loading, getConnectionNameFromUrl]) // Removed currentConnectionId from deps to avoid loops
+  }, [pathname, connections, loading, getConnectionNameFromUrl, currentConnectionId])
 
-  // Save connection ID whenever it changes (for non-URL routes)
+  // Save connection ID whenever it changes
   useEffect(() => {
     const urlConnectionName = getConnectionNameFromUrl()
-    // Save if not on a connection-specific route, or if it's a manual change
     if (!urlConnectionName && currentConnectionId) {
       saveCurrentConnectionId(currentConnectionId)
     }
   }, [currentConnectionId, getConnectionNameFromUrl])
 
   const addConnection = useCallback(async (connection: ServiceBusConnection) => {
-    console.log("addConnection called with:", connection.id, connection.name)
-    // Save to storage first
     await addConnectionStorage(connection)
-    console.log("Connection saved to storage, calling reloadConnections")
-    
-    // Reload connections from storage (single source of truth)
     await reloadConnections()
-    console.log("reloadConnections completed")
-    
-    // Set as current connection if none is selected
     if (!currentConnectionId) {
       setCurrentConnectionId(connection.id)
     }
@@ -169,24 +159,16 @@ export function useConnections_OLD() {
 
   const updateConnection = useCallback(async (connectionId: string, updates: Partial<ServiceBusConnection>) => {
     await updateConnectionStorage(connectionId, updates)
-    setConnections((prev) =>
-      prev.map((c) => (c.id === connectionId ? { ...c, ...updates, updatedAt: Date.now() } : c))
-    )
-  }, [])
+    await reloadConnections()
+  }, [reloadConnections])
 
   const removeConnection = useCallback(async (connectionId: string) => {
-    // Don't allow deleting the demo connection if demo mode is active
     if (isDemoMode && connectionId === MOCK_CONNECTION.id) {
-      console.log("Cannot delete demo connection while demo mode is active")
       throw new Error("Cannot delete demo connection while demo mode is active")
     }
     
     try {
-      console.log("Removing connection from storage:", connectionId)
-      // Delete from storage first
       await deleteConnectionStorage(connectionId)
-      
-      // Reload connections from storage (single source of truth)
       await reloadConnections()
     } catch (error) {
       console.error("Failed to remove connection:", error)
@@ -196,17 +178,30 @@ export function useConnections_OLD() {
 
   const currentConnection = connections.find((c) => c.id === currentConnectionId) || null
 
-  return {
-    connections,
-    connectionsVersion,
-    currentConnection,
-    currentConnectionId,
-    setCurrentConnectionId,
-    addConnection,
-    updateConnection,
-    removeConnection,
-    loading,
-  }
+  return (
+    <ConnectionsContext.Provider
+      value={{
+        connections,
+        connectionsVersion,
+        currentConnection,
+        currentConnectionId,
+        setCurrentConnectionId,
+        addConnection,
+        updateConnection,
+        removeConnection,
+        loading,
+      }}
+    >
+      {children}
+    </ConnectionsContext.Provider>
+  )
 }
-*/
+
+export function useConnections() {
+  const context = useContext(ConnectionsContext)
+  if (context === undefined) {
+    throw new Error("useConnections must be used within a ConnectionsProvider")
+  }
+  return context
+}
 

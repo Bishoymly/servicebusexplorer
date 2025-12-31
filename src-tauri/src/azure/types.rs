@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServiceBusConnection {
     pub id: String,
     pub name: String,
@@ -8,7 +9,7 @@ pub struct ServiceBusConnection {
     pub connection_string: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub namespace: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "useAzureAD")]
     pub use_azure_ad: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant_id: Option<String>,
