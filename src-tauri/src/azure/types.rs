@@ -80,6 +80,7 @@ pub struct TopicProperties {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubscriptionProperties {
     pub topic_name: String,
     pub subscription_name: String,

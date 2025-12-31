@@ -86,8 +86,12 @@ impl ServiceBusClient {
     pub async fn list_queues(&self) -> Result<Vec<QueueProperties>, String> {
         let mut all_queues = Vec::new();
         let mut url = format!("{}/$Resources/Queues?api-version={}", self.get_base_url(), API_VERSION);
+        let mut page_count = 0;
         
         loop {
+            page_count += 1;
+            eprintln!("[list_queues] Fetching page {} from: {}", page_count, url);
+            
             let auth_header = self.get_auth_header(&url).await?;
 
             let response = self
@@ -105,41 +109,53 @@ impl ServiceBusClient {
             }
 
             let xml = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+            
+            // Extract next link manually from XML since serde_xml_rs doesn't parse attributes correctly
+            let next_link_href = if let Some(cap) = regex::Regex::new(r#"<link\s+rel="next"\s+href="([^"]+)""#)
+                .ok()
+                .and_then(|re| re.captures(&xml))
+            {
+                Some(cap[1].replace("&amp;", "&"))
+            } else {
+                None
+            };
+            
+            if page_count == 1 {
+                eprintln!("[list_queues] Extracted next link: {:?}", next_link_href);
+            }
+            
             let feed: QueueFeed = from_str(&xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
+
+            eprintln!("[list_queues] Page {}: Found {} entries", page_count, feed.entries.len());
 
             for entry in feed.entries {
                 let props = self.queue_entry_to_properties(&entry)?;
                 all_queues.push(props);
             }
 
-            // Check for next page link
-            let next_link = feed.links.iter().find(|link| {
-                link.rel.as_ref().map(|r| r == "next").unwrap_or(false)
-            });
+            eprintln!("[list_queues] Total queues so far: {}", all_queues.len());
 
-            if let Some(link) = next_link {
-                if let Some(href) = &link.href {
-                    // Extract the relative path from the full URL
-                    // The href might be a full URL or relative path
-                    if href.starts_with("http") {
-                        // Full URL - extract path and query
-                        if let Ok(parsed_url) = url::Url::parse(href) {
-                            url = format!("{}{}?{}", self.get_base_url(), parsed_url.path(), parsed_url.query().unwrap_or(""));
-                        } else {
-                            break; // Can't parse, stop pagination
-                        }
-                    } else {
-                        // Relative URL - construct full URL
-                        url = format!("{}{}", self.get_base_url(), href);
-                    }
-                    continue;
+            // Use the manually extracted next link
+            if let Some(href) = next_link_href {
+                eprintln!("[list_queues] Following next link: {}", href);
+                
+                // href is already a full URL from Azure
+                if let Some(href) = href.strip_prefix("http") {
+                    url = format!("http{}", href);
+                } else {
+                    url = href;
                 }
+                eprintln!("[list_queues] Next page URL: {}", url);
+                continue;
+            } else {
+                eprintln!("[list_queues] No next link found, pagination complete");
             }
             
             // No more pages
             break;
         }
 
+        eprintln!("[list_queues] Final total: {} queues", all_queues.len());
         Ok(all_queues)
     }
 
@@ -766,16 +782,27 @@ impl ServiceBusClient {
 struct QueueFeed {
     #[serde(rename = "entry", default)]
     entries: Vec<QueueEntry>,
+    // Links can be at feed level - try both approaches
     #[serde(rename = "link", default)]
     links: Vec<FeedLink>,
+    // Also try with namespace prefix
+    #[serde(rename = "{http://www.w3.org/2005/Atom}link", default)]
+    links_ns: Vec<FeedLink>,
 }
 
 #[derive(Debug, Deserialize)]
 struct FeedLink {
+    // serde_xml_rs uses @attribute syntax for attributes
+    // But it might need the attribute name without @ prefix
     #[serde(rename = "@rel")]
     rel: Option<String>,
     #[serde(rename = "@href")]
     href: Option<String>,
+    // Try alternative field names in case serde_xml_rs handles it differently
+    #[serde(rename = "rel", default)]
+    rel_alt: Option<String>,
+    #[serde(rename = "href", default)]
+    href_alt: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

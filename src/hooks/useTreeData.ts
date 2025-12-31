@@ -344,7 +344,7 @@ export function useTreeData(
           }
         })
         
-        const subscriptionNodes: TreeNode[] = sortedSubs.map(sub => {
+        const subscriptionNodes: TreeNode[] = sortedSubs.map((sub, index) => {
           const badges: React.ReactNode[] = []
           if (sub.activeMessageCount !== undefined && sub.activeMessageCount > 0) {
             badges.push(React.createElement(Badge, { key: "count", variant: "secondary", className: "h-4 px-1 text-xs" }, sub.activeMessageCount))
@@ -366,8 +366,10 @@ export function useTreeData(
           if (sub.transferMessageCount !== undefined && sub.transferMessageCount > 0) {
             badges.push(React.createElement(Badge, { key: "scheduled", variant: "outline", className: "h-4 px-1 text-xs" }, `S: ${sub.transferMessageCount}`))
           }
+          // Include index in ID to ensure uniqueness even if subscriptionName is missing or duplicate
+          const subscriptionName = sub.subscriptionName || `unknown-${index}`
           return {
-            id: `subscription-${connection.id}-${topic.name}-${sub.subscriptionName || "unknown"}`,
+            id: `subscription-${connection.id}-${topic.name}-${subscriptionName}`,
             label: sub.subscriptionName || "Unknown Subscription",
             icon: React.createElement(Mail, { className: "h-3 w-3" }),
             badge: badges.length > 0 ? React.createElement("div", { className: "flex gap-1 text-xs" }, ...badges) : undefined,
