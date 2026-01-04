@@ -20,6 +20,7 @@ pub struct ServiceBusConnection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QueueProperties {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]

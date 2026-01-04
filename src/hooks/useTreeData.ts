@@ -57,11 +57,45 @@ export function useTreeData(
     setConnectionErrors(prev => ({ ...prev, [connectionId]: false }))
 
     try {
-      // Load queues and topics in parallel
-      const [queues, topics] = await Promise.all([
-        apiClient.listQueues(connection),
-        apiClient.listTopics(connection),
-      ])
+      // Load topics first (usually fewer)
+      const topics = await apiClient.listTopics(connection)
+      
+      // Load queues incrementally, page by page
+      const pageSize = 100
+      let skip = 0
+      let hasMore = true
+      let queues: QueueProperties[] = []
+      
+      while (hasMore) {
+        const pageQueues = await apiClient.listQueuesPage(connection, skip, pageSize)
+        
+        if (pageQueues.length === 0) {
+          hasMore = false
+        } else {
+          // Merge with existing queues, avoiding duplicates
+          const existingNames = new Set(queues.map(q => q.name))
+          const newQueues = pageQueues.filter(q => !existingNames.has(q.name))
+          queues = [...queues, ...newQueues]
+          
+          // Update connection data incrementally as queues load
+          setConnectionData(prev => ({
+            ...prev,
+            [connectionId]: {
+              ...prev[connectionId],
+              queues: [...queues],
+              topics: topics || prev[connectionId]?.topics || [],
+              subscriptions: prev[connectionId]?.subscriptions || {},
+            },
+          }))
+          
+          // If we got fewer than requested, we're done
+          if (pageQueues.length < pageSize) {
+            hasMore = false
+          } else {
+            skip += pageSize
+          }
+        }
+      }
 
       // Load subscriptions for each topic
       const subscriptions: Record<string, SubscriptionProperties[]> = {}
@@ -76,6 +110,7 @@ export function useTreeData(
         })
       )
 
+      // Final update with subscriptions
       setConnectionData(prev => ({
         ...prev,
         [connectionId]: { queues, topics, subscriptions },
@@ -179,20 +214,51 @@ export function useTreeData(
     if (!connection) return
     
     setLoading(prev => ({ ...prev, [connectionId]: true }))
-    apiClient.listQueues(connection)
-      .then(queues => {
-        setConnectionData(prev => ({
-          ...prev,
-          [connectionId]: {
-            ...prev[connectionId],
-            queues,
-          },
-        }))
-      })
-      .catch(err => console.error(`Failed to refresh queues for ${connectionId}:`, err))
-      .finally(() => {
-        setLoading(prev => ({ ...prev, [connectionId]: false }))
-      })
+    
+    // Load queues incrementally
+    const pageSize = 100
+    let skip = 0
+    let hasMore = true
+    let queues: QueueProperties[] = []
+    
+    const loadPage = async () => {
+      while (hasMore) {
+        try {
+          const pageQueues = await apiClient.listQueuesPage(connection, skip, pageSize)
+          
+          if (pageQueues.length === 0) {
+            hasMore = false
+          } else {
+            // Merge with existing queues, avoiding duplicates
+            const existingNames = new Set(queues.map(q => q.name))
+            const newQueues = pageQueues.filter(q => !existingNames.has(q.name))
+            queues = [...queues, ...newQueues]
+            
+            // Update connection data incrementally
+            setConnectionData(prev => ({
+              ...prev,
+              [connectionId]: {
+                ...prev[connectionId],
+                queues: [...queues],
+              },
+            }))
+            
+            // If we got fewer than requested, we're done
+            if (pageQueues.length < pageSize) {
+              hasMore = false
+            } else {
+              skip += pageSize
+            }
+          }
+        } catch (err) {
+          console.error(`Failed to refresh queues for ${connectionId}:`, err)
+          hasMore = false
+        }
+      }
+      setLoading(prev => ({ ...prev, [connectionId]: false }))
+    }
+    
+    loadPage()
   }, [connections])
 
   const handleRefreshTopics = useCallback((connectionId: string) => {
@@ -200,10 +266,46 @@ export function useTreeData(
     if (!connection) return
     
     setLoading(prev => ({ ...prev, [connectionId]: true }))
-    Promise.all([
-      apiClient.listTopics(connection),
-      apiClient.listQueues(connection).then(queues => ({ queues })),
-    ])
+    // Load topics first
+    apiClient.listTopics(connection)
+      .then(topics => {
+        // Then load queues incrementally
+        const pageSize = 100
+        let skip = 0
+        let hasMore = true
+        let queues: QueueProperties[] = []
+        
+        const loadQueuesPage = async () => {
+          while (hasMore) {
+            try {
+              const pageQueues = await apiClient.listQueuesPage(connection, skip, pageSize)
+              
+              if (pageQueues.length === 0) {
+                hasMore = false
+              } else {
+                const existingNames = new Set(queues.map(q => q.name))
+                const newQueues = pageQueues.filter(q => !existingNames.has(q.name))
+                queues = [...queues, ...newQueues]
+                
+                if (pageQueues.length < pageSize) {
+                  hasMore = false
+                } else {
+                  skip += pageSize
+                }
+              }
+            } catch (err) {
+              hasMore = false
+            }
+          }
+          
+          return { queues }
+        }
+        
+        return Promise.all([
+          Promise.resolve(topics),
+          loadQueuesPage(),
+        ])
+      })
       .then(([topics, { queues }]) => {
         const subscriptions: Record<string, SubscriptionProperties[]> = {}
         return Promise.all(

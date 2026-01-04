@@ -433,6 +433,16 @@ async fn list_queues(connection: ServiceBusConnection) -> Result<Vec<QueueProper
 }
 
 #[tauri::command]
+async fn list_queues_page(
+    connection: ServiceBusConnection,
+    skip: Option<u32>,
+    top: Option<u32>,
+) -> Result<Vec<QueueProperties>, String> {
+    let client = ServiceBusClient::create(&connection).await?;
+    client.list_queues_page(skip, top).await
+}
+
+#[tauri::command]
 async fn get_queue(connection: ServiceBusConnection, queue_name: String) -> Result<QueueProperties, String> {
     let client = ServiceBusClient::create(&connection).await?;
     client.get_queue(&queue_name).await
@@ -584,6 +594,7 @@ fn main() {
             delete_connection,
             // Azure Service Bus commands
             list_queues,
+            list_queues_page,
             get_queue,
             create_queue,
             update_queue,

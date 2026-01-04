@@ -25,13 +25,33 @@ export function useQueues(connectionOverride?: ServiceBusConnection | null) {
     setQueues([]) // Clear existing queues
     
     try {
-      // Start loading queues - the API will return queues progressively
-      // Show names immediately, then update with counts as they load
-      const loadedQueues = await apiClient.listQueues(connection)
+      // Load queues incrementally, page by page (100 at a time)
+      const pageSize = 100
+      let skip = 0
+      let hasMore = true
       
-      // Set all queues at once - they're already loaded with names first, then counts
-      // This is faster than progressive rendering since the API handles batching
-      setQueues(loadedQueues)
+      while (hasMore) {
+        const pageQueues = await apiClient.listQueuesPage(connection, skip, pageSize)
+        
+        if (pageQueues.length === 0) {
+          hasMore = false
+        } else {
+          // Append new queues to existing list
+          setQueues((prev) => {
+            // Merge with existing queues, avoiding duplicates
+            const existingNames = new Set(prev.map(q => q.name))
+            const newQueues = pageQueues.filter(q => !existingNames.has(q.name))
+            return [...prev, ...newQueues]
+          })
+          
+          // If we got fewer than requested, we're done
+          if (pageQueues.length < pageSize) {
+            hasMore = false
+          } else {
+            skip += pageSize
+          }
+        }
+      }
     } catch (err: any) {
       setError(err.message || "Failed to load queues")
     } finally {
@@ -60,16 +80,43 @@ export function useQueues(connectionOverride?: ServiceBusConnection | null) {
       setError(null)
       setQueues([])
       
-      apiClient.listQueues(connection)
-        .then((loadedQueues) => {
-          setQueues(loadedQueues)
-        })
-        .catch((err: any) => {
-          setError(err.message || "Failed to load queues")
-        })
-        .finally(() => {
-          setLoading(false)
-        })
+      // Load queues incrementally, page by page
+      const pageSize = 100
+      let skip = 0
+      let hasMore = true
+      
+      const loadPage = async () => {
+        while (hasMore) {
+          try {
+            const pageQueues = await apiClient.listQueuesPage(connection, skip, pageSize)
+            
+            if (pageQueues.length === 0) {
+              hasMore = false
+            } else {
+              // Append new queues to existing list
+              setQueues((prev) => {
+                // Merge with existing queues, avoiding duplicates
+                const existingNames = new Set(prev.map(q => q.name))
+                const newQueues = pageQueues.filter(q => !existingNames.has(q.name))
+                return [...prev, ...newQueues]
+              })
+              
+              // If we got fewer than requested, we're done
+              if (pageQueues.length < pageSize) {
+                hasMore = false
+              } else {
+                skip += pageSize
+              }
+            }
+          } catch (err: any) {
+            setError(err.message || "Failed to load queues")
+            hasMore = false
+          }
+        }
+        setLoading(false)
+      }
+      
+      loadPage()
     } else {
       setQueues([])
     }
@@ -202,8 +249,33 @@ export function useQueues(connectionOverride?: ServiceBusConnection | null) {
     setQueues([])
     
     try {
-      const loadedQueues = await apiClient.listQueues(connection)
-      setQueues(loadedQueues)
+      // Load queues incrementally, page by page
+      const pageSize = 100
+      let skip = 0
+      let hasMore = true
+      
+      while (hasMore) {
+        const pageQueues = await apiClient.listQueuesPage(connection, skip, pageSize)
+        
+        if (pageQueues.length === 0) {
+          hasMore = false
+        } else {
+          // Append new queues to existing list
+          setQueues((prev) => {
+            // Merge with existing queues, avoiding duplicates
+            const existingNames = new Set(prev.map(q => q.name))
+            const newQueues = pageQueues.filter(q => !existingNames.has(q.name))
+            return [...prev, ...newQueues]
+          })
+          
+          // If we got fewer than requested, we're done
+          if (pageQueues.length < pageSize) {
+            hasMore = false
+          } else {
+            skip += pageSize
+          }
+        }
+      }
     } catch (err: any) {
       setError(err.message || "Failed to load queues")
     } finally {

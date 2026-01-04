@@ -62,6 +62,33 @@ class ApiClient {
     return await invoke<QueueProperties[]>("list_queues", { connection: tauriConnection })
   }
 
+  async listQueuesPage(
+    connection: ServiceBusConnection | null,
+    skip?: number,
+    top?: number
+  ): Promise<QueueProperties[]> {
+    if (this.isDemoMode()) {
+      // Simulate async delay
+      await new Promise(resolve => setTimeout(resolve, 100))
+      const start = skip || 0
+      const end = top ? start + top : start + 100
+      return [...MOCK_QUEUES].slice(start, end)
+    }
+    if (!connection) {
+      throw new Error("No connection available")
+    }
+    const connWithString = await this.getConnectionWithString(connection)
+    if (!connWithString) {
+      throw new Error("No connection available")
+    }
+    const tauriConnection = this.transformConnectionForTauri(connWithString)
+    return await invoke<QueueProperties[]>("list_queues_page", {
+      connection: tauriConnection,
+      skip: skip ? skip : null,
+      top: top ? top : null,
+    })
+  }
+
   async getQueue(connection: ServiceBusConnection | null, queueName: string): Promise<QueueProperties> {
     if (this.isDemoMode()) {
       await new Promise(resolve => setTimeout(resolve, 200))

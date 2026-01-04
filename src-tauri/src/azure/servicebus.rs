@@ -128,8 +128,31 @@ impl ServiceBusClient {
 
             eprintln!("[list_queues] Page {}: Found {} entries", page_count, feed.entries.len());
 
+            // If we got 0 entries, we're done
+            if feed.entries.is_empty() {
+                eprintln!("[list_queues] No entries returned, pagination complete");
+                break;
+            }
+
+            // Extract content for each entry using regex (since serde_xml_rs can't handle nested XML in content)
+            // Match each entry's content separately
+            let content_regex = regex::Regex::new(r#"(?s)<entry[^>]*>.*?<title[^>]*>([^<]+)</title>.*?<content[^>]*type="application/xml"[^>]*>(.*?)</content>"#).ok();
+            
             for entry in feed.entries {
-                let props = self.queue_entry_to_properties(&entry)?;
+                let mut entry_with_content = entry.clone();
+                
+                // Try to find content for this entry by matching title
+                if let Some(ref re) = content_regex {
+                    if let Some(cap) = re.captures_iter(&xml).find(|cap| {
+                        cap.get(1).map(|m| m.as_str().trim()) == Some(entry.title.trim())
+                    }) {
+                        if let Some(content_match) = cap.get(2) {
+                            entry_with_content.content = Some(content_match.as_str().to_string());
+                        }
+                    }
+                }
+                
+                let props = self.queue_entry_to_properties(&entry_with_content)?;
                 all_queues.push(props);
             }
 
@@ -137,15 +160,25 @@ impl ServiceBusClient {
 
             // Use the manually extracted next link
             if let Some(href) = next_link_href {
-                eprintln!("[list_queues] Following next link: {}", href);
-                
-                // href is already a full URL from Azure
-                if let Some(href) = href.strip_prefix("http") {
-                    url = format!("http{}", href);
+                // Normalize the href URL
+                let next_url = if let Some(href) = href.strip_prefix("http") {
+                    format!("http{}", href)
                 } else {
-                    url = href;
+                    href.clone()
+                };
+                
+                // Decode URLs for comparison (normalize %24 to $, etc.)
+                let normalized_current = url.replace("%24", "$");
+                let normalized_next = next_url.replace("%24", "$");
+                
+                // Check if the next URL is the same as current URL to prevent infinite loop
+                if normalized_next == normalized_current {
+                    eprintln!("[list_queues] Next link is same as current URL, pagination complete");
+                    break;
                 }
-                eprintln!("[list_queues] Next page URL: {}", url);
+                
+                eprintln!("[list_queues] Following next link: {}", next_url);
+                url = next_url;
                 continue;
             } else {
                 eprintln!("[list_queues] No next link found, pagination complete");
@@ -157,6 +190,67 @@ impl ServiceBusClient {
 
         eprintln!("[list_queues] Final total: {} queues", all_queues.len());
         Ok(all_queues)
+    }
+
+    pub async fn list_queues_page(&self, skip: Option<u32>, top: Option<u32>) -> Result<Vec<QueueProperties>, String> {
+        // Build URL with pagination parameters
+        let mut url = format!("{}/$Resources/Queues?api-version={}", self.get_base_url(), API_VERSION);
+        if let Some(skip_val) = skip {
+            url = format!("{}&$skip={}", url, skip_val);
+        }
+        if let Some(top_val) = top {
+            url = format!("{}&$top={}", url, top_val);
+        }
+        
+        eprintln!("[list_queues_page] Fetching page (skip={:?}, top={:?}) from: {}", skip, top, url);
+        
+        let auth_header = self.get_auth_header(&url).await?;
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", &auth_header)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to list queues: {}", e))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(format!("Failed to list queues: {} - {}", status, error_text));
+        }
+
+        let xml = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+        
+        let feed: QueueFeed = from_str(&xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
+
+        eprintln!("[list_queues_page] Found {} entries", feed.entries.len());
+
+        let mut queues = Vec::new();
+        
+        // Extract content for each entry using regex
+        let content_regex = regex::Regex::new(r#"(?s)<entry[^>]*>.*?<title[^>]*>([^<]+)</title>.*?<content[^>]*type="application/xml"[^>]*>(.*?)</content>"#).ok();
+        
+        for entry in feed.entries {
+            let mut entry_with_content = entry.clone();
+            
+            // Try to find content for this entry by matching title
+            if let Some(ref re) = content_regex {
+                if let Some(cap) = re.captures_iter(&xml).find(|cap| {
+                    cap.get(1).map(|m| m.as_str().trim()) == Some(entry.title.trim())
+                }) {
+                    if let Some(content_match) = cap.get(2) {
+                        entry_with_content.content = Some(content_match.as_str().to_string());
+                    }
+                }
+            }
+            
+            let props = self.queue_entry_to_properties(&entry_with_content)?;
+            queues.push(props);
+        }
+
+        eprintln!("[list_queues_page] Returning {} queues", queues.len());
+        Ok(queues)
     }
 
     pub async fn get_queue(&self, queue_name: &str) -> Result<QueueProperties, String> {
@@ -427,8 +521,25 @@ impl ServiceBusClient {
             let xml = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
             let feed: SubscriptionFeed = from_str(&xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
 
+            // Extract content for each entry using regex (since serde_xml_rs can't handle nested XML in content)
+            // Match each entry's content separately
+            let content_regex = regex::Regex::new(r#"(?s)<entry[^>]*>.*?<title[^>]*>([^<]+)</title>.*?<content[^>]*type="application/xml"[^>]*>(.*?)</content>"#).ok();
+            
             for entry in feed.entries {
-                let props = self.subscription_entry_to_properties(topic_name, &entry)?;
+                let mut entry_with_content = entry.clone();
+                
+                // Try to find content for this entry by matching title
+                if let Some(ref re) = content_regex {
+                    if let Some(cap) = re.captures_iter(&xml).find(|cap| {
+                        cap.get(1).map(|m| m.as_str().trim()) == Some(entry.title.trim())
+                    }) {
+                        if let Some(content_match) = cap.get(2) {
+                            entry_with_content.content = Some(content_match.as_str().to_string());
+                        }
+                    }
+                }
+                
+                let props = self.subscription_entry_to_properties(topic_name, &entry_with_content)?;
                 all_subscriptions.push(props);
             }
 
@@ -497,8 +608,10 @@ impl ServiceBusClient {
         max_count: u32,
     ) -> Result<Vec<ServiceBusMessage>, String> {
         let entity_path = if let Some(q) = queue_name {
+            eprintln!("[peek_messages] Peeking from queue: {}", q);
             q.to_string()
         } else if let (Some(t), Some(s)) = (topic_name, subscription_name) {
+            eprintln!("[peek_messages] Peeking from topic/subscription: {}/{}", t, s);
             format!("{}/Subscriptions/{}", t, s)
         } else {
             return Err("Either queue_name or (topic_name and subscription_name) must be provided".to_string());
@@ -507,6 +620,7 @@ impl ServiceBusClient {
         // Azure Service Bus peek uses GET request, not POST
         // Format: /{entity-path}/messages/head?timeout={seconds}&maxcount={count}&api-version={version}
         let base_url = format!("{}/{}/messages/head?timeout=60&api-version={}", self.get_base_url(), entity_path, API_VERSION);
+        eprintln!("[peek_messages] Base URL: {}", base_url);
 
         let mut all_messages = Vec::new();
         let max_per_request = max_count.min(32); // Azure allows max 32 messages per peek
@@ -526,6 +640,8 @@ impl ServiceBusClient {
                 peek_url = format!("{}&from={}", peek_url, seq);
             }
             
+            eprintln!("[peek_messages] Fetching from URL: {}", peek_url);
+            
             // Update auth header for the new URL
             let auth_header = self.get_auth_header(&peek_url).await?;
             
@@ -533,50 +649,193 @@ impl ServiceBusClient {
                 .client
                 .get(&peek_url)
                 .header("Authorization", &auth_header)
+                .header("Accept", "application/atom+xml")
+                .header("Content-Type", "application/atom+xml")
                 .send()
                 .await
-                .map_err(|e| format!("Failed to peek messages: {}", e))?;
+                .map_err(|e| {
+                    eprintln!("[peek_messages] Request failed: {}", e);
+                    format!("Failed to peek messages: {}", e)
+                })?;
 
             let status = response.status();
+            eprintln!("[peek_messages] Response status: {}", status);
+            
+            // Extract Content-Type header before consuming the response
+            let content_type = response.headers()
+                .get("content-type")
+                .and_then(|h| h.to_str().ok())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            eprintln!("[peek_messages] Content-Type: {}", content_type);
+            
+            // Check for 204 No Content (no messages) before checking success
+            if status.as_u16() == 204 {
+                eprintln!("[peek_messages] No messages (204 No Content)");
+                break;
+            }
+            
             if !status.is_success() {
-                if status.as_u16() == 204 {
-                    // No messages
-                    break;
-                }
                 let error_text = response.text().await.unwrap_or_default();
+                eprintln!("[peek_messages] Error response: {}", error_text);
                 return Err(format!("Failed to peek messages: {} - {}", status, error_text));
             }
 
             // Parse messages from response
-            // Azure Service Bus returns messages in Atom feed format
-            let xml = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
+            // Azure Service Bus returns messages in Atom feed format (XML)
+            let response_text = response.text().await.map_err(|e| {
+                eprintln!("[peek_messages] Failed to read response text: {}", e);
+                format!("Failed to read response: {}", e)
+            })?;
             
-            // Parse the Atom feed
-            // The response is an Atom feed with <entry> elements containing messages
-            // Each entry has message properties in BrokerProperties header and body in content
-            let feed: MessageFeed = from_str(&xml).map_err(|e| format!("Failed to parse message feed: {}", e))?;
+            eprintln!("[peek_messages] Response length: {} chars", response_text.len());
             
-            let entry_count = feed.entries.len();
-            if entry_count == 0 {
-                // No more messages
-                break;
+            // Log full response if small, or preview if large
+            if response_text.len() < 2000 {
+                eprintln!("[peek_messages] Full response: {}", response_text);
+            } else {
+                eprintln!("[peek_messages] Response preview (first 1000 chars): {}", &response_text[..1000.min(response_text.len())]);
+                eprintln!("[peek_messages] Response preview (last 500 chars): {}", &response_text[response_text.len().saturating_sub(500)..]);
             }
             
-            for entry in &feed.entries {
-                let message = self.message_entry_to_message(entry)?;
-                all_messages.push(message);
-            }
+            // Check if response starts with XML declaration or feed tag
+            let trimmed = response_text.trim_start();
+            let is_xml_start = trimmed.starts_with("<?xml") || trimmed.starts_with("<feed") || trimmed.starts_with("<entry");
+            let is_json_start = trimmed.starts_with('{') || trimmed.starts_with('[');
             
-            // Track sequence number for pagination (from last message)
-            if let Some(last_entry) = feed.entries.last() {
-                if let Some(seq) = last_entry.sequence_number {
-                    sequence_number = Some(seq);
+            eprintln!("[peek_messages] Response starts with XML: {}, JSON: {}", is_xml_start, is_json_start);
+            
+            // Try to parse as XML Atom feed first (standard Azure Service Bus format)
+            // Even if it starts with JSON, it might be XML-wrapped JSON content
+            let feed_result: Result<MessageFeed, _> = from_str(&response_text);
+            
+            match feed_result {
+                Ok(feed) => {
+                    // Successfully parsed as XML Atom feed
+                    let entry_count = feed.entries.len();
+                    eprintln!("[peek_messages] Parsed {} entries from XML feed", entry_count);
+                    
+                    if entry_count == 0 {
+                        // No more messages
+                        break;
+                    }
+                    
+                    for (idx, entry) in feed.entries.iter().enumerate() {
+                        eprintln!("[peek_messages] Processing entry {}", idx);
+                        let message = self.message_entry_to_message(entry).map_err(|e| {
+                            eprintln!("[peek_messages] Failed to convert entry {} to message: {}", idx, e);
+                            e
+                        })?;
+                        all_messages.push(message);
+                    }
+                    
+                    eprintln!("[peek_messages] Successfully processed {} messages, total so far: {}", entry_count, all_messages.len());
+                    
+                    // Track sequence number for pagination (from last message)
+                    if let Some(last_entry) = feed.entries.last() {
+                        if let Some(seq) = last_entry.sequence_number {
+                            sequence_number = Some(seq);
+                        }
+                    }
+                    
+                    // If we got fewer messages than requested, we're done
+                    if entry_count < count {
+                        break;
+                    }
+                    
+                    // Continue to next iteration of loop for pagination
+                    continue;
                 }
-            }
-            
-            // If we got fewer messages than requested, we're done
-            if entry_count < count {
-                break;
+                Err(xml_err) => {
+                    // XML parsing failed - check if it's JSON
+                    eprintln!("[peek_messages] XML parsing failed: {}", xml_err);
+                    
+                    if is_json_start && !is_xml_start {
+                        eprintln!("[peek_messages] Detected JSON response (raw message body)");
+                        // Azure is returning JSON instead of XML Atom feed - this is non-standard
+                        // Try to parse as JSON - could be a single message object or an array
+                        match serde_json::from_str::<serde_json::Value>(&response_text) {
+                            Ok(json_value) => {
+                                // Check if it's an array of messages
+                                if let Some(array) = json_value.as_array() {
+                                    eprintln!("[peek_messages] JSON is an array with {} messages", array.len());
+                                    for (idx, item) in array.iter().enumerate() {
+                                        // Extract message properties from JSON object
+                                        let message_id = item.get("MessageId").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                        let body = item.clone(); // Use the whole JSON object as body
+                                        
+                                        let message = ServiceBusMessage {
+                                            body,
+                                            message_id: message_id.clone(),
+                                            correlation_id: item.get("CorrelationId").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                            content_type: Some("application/json".to_string()),
+                                            sequence_number: item.get("SequenceNumber").and_then(|v| v.as_i64()).map(|s| s as u64),
+                                            subject: item.get("Subject").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                            reply_to: item.get("ReplyTo").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                            reply_to_session_id: item.get("ReplyToSessionId").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                            session_id: item.get("SessionId").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                            time_to_live: None,
+                                            to: item.get("To").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                            application_properties: None,
+                                            delivery_count: item.get("DeliveryCount").and_then(|v| v.as_u64()).map(|s| s as u32),
+                                            enqueued_time_utc: item.get("EnqueuedTimeUtc").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                            locked_until_utc: item.get("LockedUntilUtc").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                            dead_letter_reason: item.get("DeadLetterReason").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                            dead_letter_error_description: item.get("DeadLetterErrorDescription").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        };
+                                        all_messages.push(message);
+                                    }
+                                    eprintln!("[peek_messages] Created {} messages from JSON array", array.len());
+                                } else {
+                                    // Single message object
+                                    eprintln!("[peek_messages] JSON is a single message object");
+                                    // Extract message properties from JSON object
+                                    let message_id = json_value.get("MessageId").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                    let body = json_value.clone(); // Use the whole JSON object as body
+                                    
+                                    let message = ServiceBusMessage {
+                                        body,
+                                        message_id: message_id.clone(),
+                                        correlation_id: json_value.get("CorrelationId").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        content_type: Some("application/json".to_string()),
+                                        sequence_number: json_value.get("SequenceNumber").and_then(|v| v.as_i64()).map(|s| s as u64),
+                                        subject: json_value.get("Subject").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        reply_to: json_value.get("ReplyTo").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        reply_to_session_id: json_value.get("ReplyToSessionId").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        session_id: json_value.get("SessionId").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        time_to_live: None,
+                                        to: json_value.get("To").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        application_properties: None,
+                                        delivery_count: json_value.get("DeliveryCount").and_then(|v| v.as_u64()).map(|s| s as u32),
+                                        enqueued_time_utc: json_value.get("EnqueuedTimeUtc").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        locked_until_utc: json_value.get("LockedUntilUtc").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        dead_letter_reason: json_value.get("DeadLetterReason").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                        dead_letter_error_description: json_value.get("DeadLetterErrorDescription").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                    };
+                                    all_messages.push(message);
+                                    eprintln!("[peek_messages] Created 1 message from JSON object");
+                                }
+                                
+                                // If we got JSON, we can't paginate (no sequence number or standard format)
+                                // But we requested more, so this might be an error
+                                if all_messages.len() < max_count as usize {
+                                    eprintln!("[peek_messages] Warning: Got JSON response with {} messages but requested {}. Azure may have returned raw message body instead of Atom feed.", all_messages.len(), max_count);
+                                }
+                                
+                                // Break since we can't paginate JSON responses
+                                break;
+                            }
+                            Err(json_err) => {
+                                eprintln!("[peek_messages] Failed to parse as JSON: {}", json_err);
+                                return Err(format!("Failed to parse response as XML or JSON. XML error: {}, JSON error: {}", xml_err, json_err));
+                            }
+                        }
+                    } else {
+                        // Not JSON, and XML parsing failed
+                        eprintln!("[peek_messages] Response starts with: {}", &response_text[..response_text.len().min(100)]);
+                        return Err(format!("Failed to parse message feed: {}", xml_err));
+                    }
+                }
             }
         }
 
@@ -706,8 +965,56 @@ impl ServiceBusClient {
 
     // Helper methods for XML parsing and generation
     fn queue_entry_to_properties(&self, entry: &QueueEntry) -> Result<QueueProperties, String> {
-        // Parse XML entry to QueueProperties
-        // This is a simplified version - full implementation would parse all XML fields
+        // Parse message counts from content XML
+        let mut message_count: Option<u64> = None;
+        let mut active_message_count: Option<u64> = None;
+        let mut dead_letter_message_count: Option<u64> = None;
+        let mut scheduled_message_count: Option<u64> = None;
+        let mut transfer_message_count: Option<u64> = None;
+        let mut transfer_dead_letter_message_count: Option<u64> = None;
+        
+        if let Some(ref content) = entry.content {
+            // Extract counts from CountDetails using regex
+            // Format: <d2p1:ActiveMessageCount>0</d2p1:ActiveMessageCount>
+            if let Some(cap) = regex::Regex::new(r#"<d2p1:ActiveMessageCount>(\d+)</d2p1:ActiveMessageCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                active_message_count = cap[1].parse().ok();
+            }
+            if let Some(cap) = regex::Regex::new(r#"<d2p1:DeadLetterMessageCount>(\d+)</d2p1:DeadLetterMessageCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                dead_letter_message_count = cap[1].parse().ok();
+            }
+            if let Some(cap) = regex::Regex::new(r#"<d2p1:ScheduledMessageCount>(\d+)</d2p1:ScheduledMessageCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                scheduled_message_count = cap[1].parse().ok();
+            }
+            if let Some(cap) = regex::Regex::new(r#"<d2p1:TransferMessageCount>(\d+)</d2p1:TransferMessageCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                transfer_message_count = cap[1].parse().ok();
+            }
+            if let Some(cap) = regex::Regex::new(r#"<d2p1:TransferDeadLetterMessageCount>(\d+)</d2p1:TransferDeadLetterMessageCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                transfer_dead_letter_message_count = cap[1].parse().ok();
+            }
+            // Also check for MessageCount (total)
+            if let Some(cap) = regex::Regex::new(r#"<MessageCount>(\d+)</MessageCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                message_count = cap[1].parse().ok();
+            }
+        }
+        
         Ok(QueueProperties {
             name: entry.title.clone(),
             max_size_in_megabytes: None,
@@ -720,12 +1027,12 @@ impl ServiceBusClient {
             enable_partitioning: None,
             requires_session: None,
             requires_duplicate_detection: None,
-            message_count: None,
-            active_message_count: None,
-            dead_letter_message_count: None,
-            scheduled_message_count: None,
-            transfer_message_count: None,
-            transfer_dead_letter_message_count: None,
+            message_count,
+            active_message_count,
+            dead_letter_message_count,
+            scheduled_message_count,
+            transfer_message_count,
+            transfer_dead_letter_message_count,
             size_in_bytes: None,
         })
     }
@@ -755,6 +1062,49 @@ impl ServiceBusClient {
     }
 
     fn subscription_entry_to_properties(&self, topic_name: &str, entry: &SubscriptionEntry) -> Result<SubscriptionProperties, String> {
+        // Parse message counts from content XML
+        let mut message_count: Option<u64> = None;
+        let mut active_message_count: Option<u64> = None;
+        let mut dead_letter_message_count: Option<u64> = None;
+        let mut transfer_message_count: Option<u64> = None;
+        let mut transfer_dead_letter_message_count: Option<u64> = None;
+        
+        if let Some(ref content) = entry.content {
+            // Extract counts from CountDetails using regex
+            // Format: <d2p1:ActiveMessageCount>0</d2p1:ActiveMessageCount>
+            if let Some(cap) = regex::Regex::new(r#"<d2p1:ActiveMessageCount>(\d+)</d2p1:ActiveMessageCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                active_message_count = cap[1].parse().ok();
+            }
+            if let Some(cap) = regex::Regex::new(r#"<d2p1:DeadLetterMessageCount>(\d+)</d2p1:DeadLetterMessageCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                dead_letter_message_count = cap[1].parse().ok();
+            }
+            if let Some(cap) = regex::Regex::new(r#"<d2p1:TransferMessageCount>(\d+)</d2p1:TransferMessageCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                transfer_message_count = cap[1].parse().ok();
+            }
+            if let Some(cap) = regex::Regex::new(r#"<d2p1:TransferDeadLetterMessageCount>(\d+)</d2p1:TransferDeadLetterMessageCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                transfer_dead_letter_message_count = cap[1].parse().ok();
+            }
+            // Also check for MessageCount (total)
+            if let Some(cap) = regex::Regex::new(r#"<MessageCount>(\d+)</MessageCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                message_count = cap[1].parse().ok();
+            }
+        }
+        
         Ok(SubscriptionProperties {
             topic_name: topic_name.to_string(),
             subscription_name: entry.title.clone(),
@@ -764,11 +1114,11 @@ impl ServiceBusClient {
             dead_lettering_on_message_expiration: None,
             enable_batched_operations: None,
             requires_session: None,
-            message_count: None,
-            active_message_count: None,
-            dead_letter_message_count: None,
-            transfer_message_count: None,
-            transfer_dead_letter_message_count: None,
+            message_count,
+            active_message_count,
+            dead_letter_message_count,
+            transfer_message_count,
+            transfer_dead_letter_message_count,
         })
     }
 
@@ -805,10 +1155,11 @@ struct FeedLink {
     href_alt: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct QueueEntry {
     title: String,
-    // Add other fields as needed
+    #[serde(skip)]
+    content: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -857,8 +1208,10 @@ struct MessageEntry {
     sequence_number: Option<i64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct SubscriptionEntry {
     title: String,
+    #[serde(skip)]
+    content: Option<String>,
 }
 
