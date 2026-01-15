@@ -600,7 +600,135 @@ impl ServiceBusClient {
     }
 
     // Message operations
+    // New implementation using azservicebus SDK for proper batch peeking
+    pub async fn peek_messages_sdk(
+        &self,
+        queue_name: Option<&str>,
+        topic_name: Option<&str>,
+        subscription_name: Option<&str>,
+        max_count: u32,
+    ) -> Result<Vec<ServiceBusMessage>, String> {
+        use azservicebus::prelude::*;
+        
+        let connection_string = if let Some(ref parsed) = self.parsed_connection {
+            // Reconstruct connection string from parsed components
+            format!(
+                "Endpoint=sb://{}{}/;SharedAccessKeyName={};SharedAccessKey={}",
+                self.namespace,
+                self.endpoint_domain,
+                parsed.shared_access_key_name,
+                parsed.shared_access_key
+            )
+        } else {
+            return Err("Connection string not available for SDK".to_string());
+        };
+
+        eprintln!("[peek_messages_sdk] Using azservicebus SDK to peek {} messages", max_count);
+
+        // Create ServiceBus client
+        let mut client = ServiceBusClient::new_from_connection_string(
+            &connection_string,
+            ServiceBusClientOptions::default(),
+        )
+        .await
+        .map_err(|e| format!("Failed to create ServiceBus client: {}", e))?;
+
+        // Create receiver based on entity type
+        let mut receiver = if let Some(q) = queue_name {
+            eprintln!("[peek_messages_sdk] Creating receiver for queue: {}", q);
+            client
+                .create_receiver_for_queue(q, ServiceBusReceiverOptions::default())
+                .await
+                .map_err(|e| format!("Failed to create queue receiver: {}", e))?
+        } else if let (Some(t), Some(s)) = (topic_name, subscription_name) {
+            eprintln!("[peek_messages_sdk] Creating receiver for topic/subscription: {}/{}", t, s);
+            client
+                .create_receiver_for_subscription(t, s, ServiceBusReceiverOptions::default())
+                .await
+                .map_err(|e| format!("Failed to create subscription receiver: {}", e))?
+        } else {
+            return Err("Either queue_name or (topic_name and subscription_name) must be provided".to_string());
+        };
+
+        // Peek messages using SDK
+        // peek_messages takes (max_count: u32, from_sequence_number: Option<i64>)
+        let sdk_messages = receiver
+            .peek_messages(max_count, None)
+            .await
+            .map_err(|e| format!("Failed to peek messages: {}", e))?;
+
+        eprintln!("[peek_messages_sdk] SDK returned {} messages", sdk_messages.len());
+
+        // Convert SDK ReceivedMessage to our ServiceBusMessage format
+        let mut messages = Vec::new();
+        for (idx, sdk_msg) in sdk_messages.iter().enumerate() {
+            eprintln!("[peek_messages_sdk] Processing message {}", idx + 1);
+            
+            // Get message body (returns Result)
+            let body_bytes = sdk_msg.body().map_err(|e| format!("Failed to get message body: {}", e))?;
+            
+            // Try to parse as JSON, otherwise use as string
+            let body = match serde_json::from_slice::<serde_json::Value>(body_bytes) {
+                Ok(json) => json,
+                Err(_) => {
+                    // If not JSON, try as UTF-8 string
+                    match std::str::from_utf8(body_bytes) {
+                        Ok(s) => serde_json::Value::String(s.to_string()),
+                        Err(_) => serde_json::Value::String(format!("<binary data: {} bytes>", body_bytes.len())),
+                    }
+                }
+            };
+
+            // Access properties from ReceivedMessage and create our ServiceBusMessage
+            // Convert OffsetDateTime to string - use format! with Display trait
+            let enqueued_time_str = format!("{}", sdk_msg.enqueued_time());
+            
+            let message = crate::azure::types::ServiceBusMessage {
+                body,
+                message_id: sdk_msg.message_id().as_ref().map(|id| id.to_string()),
+                correlation_id: sdk_msg.correlation_id().as_ref().map(|id| id.to_string()),
+                content_type: sdk_msg.content_type().as_ref().map(|ct| ct.to_string()),
+                sequence_number: Some(sdk_msg.sequence_number() as u64), // Convert i64 to u64
+                subject: sdk_msg.subject().as_ref().map(|s| s.to_string()),
+                reply_to: sdk_msg.reply_to().as_ref().map(|r| r.to_string()),
+                reply_to_session_id: sdk_msg.reply_to_session_id().as_ref().map(|s| s.to_string()),
+                session_id: sdk_msg.session_id().as_ref().map(|s| s.to_string()),
+                time_to_live: sdk_msg.time_to_live().map(|ttl| ttl.as_secs()),
+                to: sdk_msg.to().as_ref().map(|t| t.to_string()),
+                application_properties: None, // Could extract from user_properties if needed
+                delivery_count: None, // Not available on peeked messages
+                enqueued_time_utc: Some(enqueued_time_str),
+                locked_until_utc: None, // Peek doesn't lock
+                dead_letter_reason: None,
+                dead_letter_error_description: None,
+            };
+            
+            messages.push(message);
+        }
+
+        // Cleanup
+        receiver.dispose().await.map_err(|e| format!("Failed to dispose receiver: {}", e))?;
+        client.dispose().await.map_err(|e| format!("Failed to dispose client: {}", e))?;
+
+        eprintln!("[peek_messages_sdk] Successfully converted {} messages", messages.len());
+        Ok(messages)
+    }
+
+    // Main peek_messages method - uses SDK by default for proper batch peeking
     pub async fn peek_messages(
+        &self,
+        queue_name: Option<&str>,
+        topic_name: Option<&str>,
+        subscription_name: Option<&str>,
+        max_count: u32,
+    ) -> Result<Vec<ServiceBusMessage>, String> {
+        // Use SDK implementation for proper batch peeking
+        self.peek_messages_sdk(queue_name, topic_name, subscription_name, max_count).await
+    }
+
+    // Original REST API implementation (kept for backward compatibility if needed)
+    #[allow(dead_code)]
+    pub async fn peek_messages_rest(
         &self,
         queue_name: Option<&str>,
         topic_name: Option<&str>,
@@ -625,6 +753,7 @@ impl ServiceBusClient {
         let mut all_messages = Vec::new();
         let max_per_request = max_count.min(32); // Azure allows max 32 messages per peek
         let mut sequence_number: Option<i64> = None; // For pagination
+        let mut seen_message_ids = std::collections::HashSet::new(); // Track seen messages to avoid duplicates
 
         loop {
             let remaining = max_count as usize - all_messages.len();
@@ -633,7 +762,21 @@ impl ServiceBusClient {
             }
             
             let count = remaining.min(max_per_request as usize);
-            let mut peek_url = format!("{}&maxcount={}", base_url, count);
+            
+            // When we get JSON responses without sequence numbers, we can't paginate properly
+            // Try different approaches: with maxcount, without maxcount, or with maxcount=1
+            let mut peek_url = if all_messages.is_empty() {
+                // First request: try with the requested maxcount
+                format!("{}&maxcount={}", base_url, count)
+            } else if sequence_number.is_none() && seen_message_ids.len() == all_messages.len() {
+                // We got JSON without sequence numbers - try without maxcount to see if we get XML
+                // Or try with maxcount=1 to get individual messages
+                eprintln!("[peek_messages] Got JSON without sequence numbers, trying without maxcount to get XML Atom feed");
+                base_url.clone() // No maxcount parameter
+            } else {
+                // Use the requested count
+                format!("{}&maxcount={}", base_url, count.min(32))
+            };
             
             // Add from parameter for pagination if we have a sequence number
             if let Some(seq) = sequence_number {
@@ -683,10 +826,20 @@ impl ServiceBusClient {
 
             // Parse messages from response
             // Azure Service Bus returns messages in Atom feed format (XML)
+            // However, sometimes Azure returns JSON instead, especially when maxcount is used
             let response_text = response.text().await.map_err(|e| {
                 eprintln!("[peek_messages] Failed to read response text: {}", e);
                 format!("Failed to read response: {}", e)
             })?;
+            
+            // Debug: Check if response might be XML-wrapped JSON by looking for XML tags
+            // even if it starts with {
+            if response_text.trim_start().starts_with('{') {
+                // Check if there are any XML tags in the response (might be XML-wrapped)
+                if response_text.contains('<') && (response_text.contains("feed") || response_text.contains("entry")) {
+                    eprintln!("[peek_messages] Response starts with {{ but contains XML tags - might be XML-wrapped JSON");
+                }
+            }
             
             eprintln!("[peek_messages] Response length: {} chars", response_text.len());
             
@@ -705,9 +858,21 @@ impl ServiceBusClient {
             
             eprintln!("[peek_messages] Response starts with XML: {}, JSON: {}", is_xml_start, is_json_start);
             
+            // Check if response might be XML-wrapped JSON (look for common XML patterns even if it starts with {)
+            let might_be_xml_wrapped = trimmed.contains("<feed") || trimmed.contains("<entry") || trimmed.contains("<?xml");
+            if might_be_xml_wrapped && is_json_start {
+                eprintln!("[peek_messages] Warning: Response starts with JSON but might contain XML elements - could be XML-wrapped JSON");
+            }
+            
             // Try to parse as XML Atom feed first (standard Azure Service Bus format)
             // Even if it starts with JSON, it might be XML-wrapped JSON content
+            // However, if Content-Type says XML but body is JSON, Azure might be misconfigured
+            // Try parsing as XML first
             let feed_result: Result<MessageFeed, _> = from_str(&response_text);
+            
+            // If XML parsing fails and Content-Type says XML but body is JSON,
+            // this might indicate Azure is returning raw message body instead of Atom feed
+            // This could happen if maxcount parameter causes issues or if Azure is misconfigured
             
             match feed_result {
                 Ok(feed) => {
@@ -793,12 +958,15 @@ impl ServiceBusClient {
                                     let message_id = json_value.get("MessageId").and_then(|v| v.as_str()).map(|s| s.to_string());
                                     let body = json_value.clone(); // Use the whole JSON object as body
                                     
+                                    // Try to extract sequence number for pagination
+                                    let seq_num = json_value.get("SequenceNumber").and_then(|v| v.as_i64());
+                                    
                                     let message = ServiceBusMessage {
                                         body,
                                         message_id: message_id.clone(),
                                         correlation_id: json_value.get("CorrelationId").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                         content_type: Some("application/json".to_string()),
-                                        sequence_number: json_value.get("SequenceNumber").and_then(|v| v.as_i64()).map(|s| s as u64),
+                                        sequence_number: seq_num.map(|s| s as u64),
                                         subject: json_value.get("Subject").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                         reply_to: json_value.get("ReplyTo").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                         reply_to_session_id: json_value.get("ReplyToSessionId").and_then(|v| v.as_str()).map(|s| s.to_string()),
@@ -812,18 +980,53 @@ impl ServiceBusClient {
                                         dead_letter_reason: json_value.get("DeadLetterReason").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                         dead_letter_error_description: json_value.get("DeadLetterErrorDescription").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                     };
+                                    // Check if we've already seen this message
+                                    if let Some(ref msg_id) = message_id {
+                                        if seen_message_ids.contains(msg_id) {
+                                            eprintln!("[peek_messages] Already seen message ID {}, stopping pagination", msg_id);
+                                            break; // We're getting duplicates, stop
+                                        }
+                                        seen_message_ids.insert(msg_id.clone());
+                                    }
+                                    
                                     all_messages.push(message);
                                     eprintln!("[peek_messages] Created 1 message from JSON object");
+                                    
+                                    // Update sequence number for pagination if available
+                                    if let Some(seq) = seq_num {
+                                        sequence_number = Some(seq);
+                                        eprintln!("[peek_messages] Extracted sequence number {} for pagination", seq);
+                                    }
+                                    
+                                    // When Azure returns JSON, it typically returns one message at a time
+                                    // We need to make multiple requests to get more messages
+                                    // Track this message ID to avoid duplicates
+                                    if let Some(ref msg_id) = message_id {
+                                        if seen_message_ids.contains(msg_id) {
+                                            eprintln!("[peek_messages] Already seen message ID {}, stopping pagination", msg_id);
+                                            break; // We're getting duplicates, stop
+                                        }
+                                        seen_message_ids.insert(msg_id.clone());
+                                    }
+                                    
+                                    // If we got only 1 message but requested more, continue making requests
+                                    if all_messages.len() < max_count as usize {
+                                        if sequence_number.is_some() {
+                                            eprintln!("[peek_messages] Got 1 JSON message, continuing pagination with sequence number (have {} of {})", all_messages.len(), max_count);
+                                            continue; // Continue loop to get more messages
+                                        } else {
+                                            // No sequence number, but Azure might return different messages on subsequent requests
+                                            // Try making another request - Azure might cycle through messages
+                                            eprintln!("[peek_messages] Got 1 JSON message without sequence number. Making another request to get next message (have {} of {})", all_messages.len(), max_count);
+                                            // Reset to try getting the next message
+                                            sequence_number = None;
+                                            continue; // Continue to get more messages
+                                        }
+                                    } else {
+                                        // We've reached max_count
+                                        break;
+                                    }
                                 }
-                                
-                                // If we got JSON, we can't paginate (no sequence number or standard format)
-                                // But we requested more, so this might be an error
-                                if all_messages.len() < max_count as usize {
-                                    eprintln!("[peek_messages] Warning: Got JSON response with {} messages but requested {}. Azure may have returned raw message body instead of Atom feed.", all_messages.len(), max_count);
-                                }
-                                
-                                // Break since we can't paginate JSON responses
-                                break;
                             }
                             Err(json_err) => {
                                 eprintln!("[peek_messages] Failed to parse as JSON: {}", json_err);

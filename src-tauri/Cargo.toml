@@ -6,6 +6,7 @@ authors = ["you"]
 license = ""
 repository = ""
 edition = "2021"
+default-run = "servicebusexplorer"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -32,6 +33,17 @@ url = "2.5"
 regex = "1.10"
 urlencoding = "2.1"
 serde-xml-rs = "0.6"
+azservicebus = "0.25"
+
+# Main app binary (default)
+[[bin]]
+name = "servicebusexplorer"
+path = "src/main.rs"
+
+# Test binary for debugging peek functionality
+[[bin]]
+name = "test-peek"
+path = "src/bin/test-peek.rs"
 
 [profile.release]
 # Include debug symbols for Xcode dSYM generation
