@@ -520,7 +520,7 @@ export function useTreeData(
                   {
                     variant: "ghost",
                     size: "sm",
-                    className: "h-5 w-5 p-0",
+                    className: "h-5 w-5 p-0 cursor-pointer hover:bg-accent",
                     onClick: (e: React.MouseEvent) => e.stopPropagation(),
                   },
                   React.createElement(ArrowUpDown, { className: "h-3 w-3" })
@@ -531,17 +531,26 @@ export function useTreeData(
                 { key: "content", align: "end" },
                 React.createElement(
                   DropdownMenuItem,
-                  { onClick: () => handleSortChange(connection.id, "queues", "name") },
+                  { 
+                    className: "cursor-pointer hover:bg-accent",
+                    onClick: () => handleSortChange(connection.id, "queues", "name") 
+                  },
                   "Sort by Name"
                 ),
                 React.createElement(
                   DropdownMenuItem,
-                  { onClick: () => handleSortChange(connection.id, "queues", "messageCount") },
+                  { 
+                    className: "cursor-pointer hover:bg-accent",
+                    onClick: () => handleSortChange(connection.id, "queues", "messageCount") 
+                  },
                   "Sort by Message Count"
                 ),
                 React.createElement(
                   DropdownMenuItem,
-                  { onClick: () => handleSortChange(connection.id, "queues", "deadLetterCount") },
+                  { 
+                    className: "cursor-pointer hover:bg-accent",
+                    onClick: () => handleSortChange(connection.id, "queues", "deadLetterCount") 
+                  },
                   "Sort by Dead Letter Count"
                 )
               ),
@@ -605,7 +614,7 @@ export function useTreeData(
                   {
                     variant: "ghost",
                     size: "sm",
-                    className: "h-5 w-5 p-0",
+                    className: "h-5 w-5 p-0 cursor-pointer hover:bg-accent",
                     onClick: (e: React.MouseEvent) => e.stopPropagation(),
                   },
                   React.createElement(ArrowUpDown, { className: "h-3 w-3" })
@@ -616,12 +625,18 @@ export function useTreeData(
                 { key: "content", align: "end" },
                 React.createElement(
                   DropdownMenuItem,
-                  { onClick: () => handleSortChange(connection.id, "topics", "name") },
+                  { 
+                    className: "cursor-pointer hover:bg-accent",
+                    onClick: () => handleSortChange(connection.id, "topics", "name") 
+                  },
                   "Sort by Name"
                 ),
                 React.createElement(
                   DropdownMenuItem,
-                  { onClick: () => handleSortChange(connection.id, "topics", "subscriptionCount") },
+                  { 
+                    className: "cursor-pointer hover:bg-accent",
+                    onClick: () => handleSortChange(connection.id, "topics", "subscriptionCount") 
+                  },
                   "Sort by Subscription Count"
                 ),
               ),
