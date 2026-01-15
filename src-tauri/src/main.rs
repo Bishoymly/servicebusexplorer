@@ -533,10 +533,8 @@ async fn peek_dead_letter_messages(
     subscription_name: Option<String>,
     max_count: u32,
 ) -> Result<Vec<ServiceBusMessage>, String> {
-    // For dead letter messages, we use the same peek but with a different path
-    // This is a simplified version - full implementation would handle dead letter queue path
     let client = ServiceBusClient::create(&connection).await?;
-    client.peek_messages(
+    client.peek_dead_letter_messages_sdk(
         queue_name.as_deref(),
         topic_name.as_deref(),
         subscription_name.as_deref(),

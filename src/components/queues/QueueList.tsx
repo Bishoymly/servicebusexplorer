@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useCallback } from "react"
 import { Plus, RefreshCw, ArrowUpDown, Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -47,6 +47,16 @@ export function QueueList() {
     setShowDetails(false)
     setShowSettings(false)
   }, [currentConnectionId])
+
+  // Sync selectedQueue with updated queue from the list when queues change
+  useEffect(() => {
+    if (selectedQueue && selectedQueueForMessages) {
+      const updatedQueue = queues.find(q => q.name === selectedQueueForMessages)
+      if (updatedQueue) {
+        setSelectedQueue(updatedQueue)
+      }
+    }
+  }, [queues, selectedQueue, selectedQueueForMessages])
 
   const handleQueueClick = (queue: QueueProperties) => {
     setSelectedQueue(queue)
@@ -227,19 +237,41 @@ export function QueueList() {
       </div>
 
       {/* Right Panel - Messages */}
-      {selectedQueueForMessages && currentConnection && (
-        <div className="w-1/2 min-w-[500px]">
-          <QueueMessagesPanel
-            queueName={selectedQueueForMessages}
-            connection={currentConnection}
-            initialShowDeadLetter={showDeadLetterForQueue === selectedQueueForMessages}
-            onClose={() => {
-              setSelectedQueueForMessages(null)
-              setShowDeadLetterForQueue(null)
-            }}
-          />
-        </div>
-      )}
+      {selectedQueueForMessages && currentConnection && (() => {
+        // Find the queue from the current list to ensure we have the latest properties
+        const currentQueue = queues.find(q => q.name === selectedQueueForMessages) || selectedQueue
+        console.log("QueueList: Rendering QueueMessagesPanel with:", {
+          queueName: selectedQueueForMessages,
+          currentQueue: currentQueue ? {
+            name: currentQueue.name,
+            activeMessageCount: currentQueue.activeMessageCount,
+            deadLetterMessageCount: currentQueue.deadLetterMessageCount
+          } : null,
+          selectedQueue: selectedQueue ? {
+            name: selectedQueue.name,
+            activeMessageCount: selectedQueue.activeMessageCount,
+            deadLetterMessageCount: selectedQueue.deadLetterMessageCount
+          } : null
+        })
+        return (
+          <div className="w-1/2 min-w-[500px]">
+            <QueueMessagesPanel
+              queueName={selectedQueueForMessages}
+              connection={currentConnection}
+              initialShowDeadLetter={showDeadLetterForQueue === selectedQueueForMessages}
+              initialQueueProperties={currentQueue || undefined}
+              onQueueUpdated={() => {
+                // Refresh the queues list to get updated counts
+                refresh()
+              }}
+              onClose={() => {
+                setSelectedQueueForMessages(null)
+                setShowDeadLetterForQueue(null)
+              }}
+            />
+          </div>
+        )
+      })()}
 
       {selectedQueue && (
         <>

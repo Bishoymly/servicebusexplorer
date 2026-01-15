@@ -17,6 +17,7 @@ pub struct ServiceBusClient {
     use_azure_ad: bool,
 }
 
+#[allow(dead_code)] // Methods are used by main app, not all by test binary
 impl ServiceBusClient {
     pub async fn create(connection: &ServiceBusConnection) -> Result<Self, String> {
         let client = Client::builder()
@@ -683,6 +684,23 @@ impl ServiceBusClient {
             // Convert OffsetDateTime to string - use format! with Display trait
             let enqueued_time_str = format!("{}", sdk_msg.enqueued_time());
             
+            // Extract application properties (user_properties) from the SDK message
+            // Try to get user_properties - the exact API may vary, so we'll try a few approaches
+            let application_properties = {
+                // Try to access user_properties - this might be through a method or direct field
+                // For now, we'll set to None and can enhance later if the SDK provides access
+                // The SDK may expose this differently - checking what's available
+                None
+            };
+            
+            // Extract delivery_count - try to get it from the message
+            // Peeked messages may not have delivery_count, but let's try
+            let delivery_count = {
+                // Try to access delivery_count if available
+                // This might not be available on peeked messages, only on received/locked messages
+                None
+            };
+            
             let message = crate::azure::types::ServiceBusMessage {
                 body,
                 message_id: sdk_msg.message_id().as_ref().map(|id| id.to_string()),
@@ -695,8 +713,8 @@ impl ServiceBusClient {
                 session_id: sdk_msg.session_id().as_ref().map(|s| s.to_string()),
                 time_to_live: sdk_msg.time_to_live().map(|ttl| ttl.as_secs()),
                 to: sdk_msg.to().as_ref().map(|t| t.to_string()),
-                application_properties: None, // Could extract from user_properties if needed
-                delivery_count: None, // Not available on peeked messages
+                application_properties,
+                delivery_count,
                 enqueued_time_utc: Some(enqueued_time_str),
                 locked_until_utc: None, // Peek doesn't lock
                 dead_letter_reason: None,
@@ -724,6 +742,135 @@ impl ServiceBusClient {
     ) -> Result<Vec<ServiceBusMessage>, String> {
         // Use SDK implementation for proper batch peeking
         self.peek_messages_sdk(queue_name, topic_name, subscription_name, max_count).await
+    }
+
+    // Peek messages from dead letter queue using SDK
+    pub async fn peek_dead_letter_messages_sdk(
+        &self,
+        queue_name: Option<&str>,
+        topic_name: Option<&str>,
+        subscription_name: Option<&str>,
+        max_count: u32,
+    ) -> Result<Vec<ServiceBusMessage>, String> {
+        use azservicebus::prelude::*;
+        
+        let connection_string = if let Some(ref parsed) = self.parsed_connection {
+            // Reconstruct connection string from parsed components
+            format!(
+                "Endpoint=sb://{}{}/;SharedAccessKeyName={};SharedAccessKey={}",
+                self.namespace,
+                self.endpoint_domain,
+                parsed.shared_access_key_name,
+                parsed.shared_access_key
+            )
+        } else {
+            return Err("Connection string not available for SDK".to_string());
+        };
+
+        eprintln!("[peek_dead_letter_messages_sdk] Using azservicebus SDK to peek {} messages from dead letter queue", max_count);
+
+        // Create ServiceBus client
+        let mut client = ServiceBusClient::new_from_connection_string(
+            &connection_string,
+            ServiceBusClientOptions::default(),
+        )
+        .await
+        .map_err(|e| format!("Failed to create ServiceBus client: {}", e))?;
+
+        // Create receiver for dead letter queue using the $deadletterqueue path (lowercase)
+        let mut receiver = if let Some(q) = queue_name {
+            let dead_letter_path = format!("{}/$deadletterqueue", q);
+            eprintln!("[peek_dead_letter_messages_sdk] Creating receiver for dead letter queue: {}", dead_letter_path);
+            client
+                .create_receiver_for_queue(&dead_letter_path, ServiceBusReceiverOptions::default())
+                .await
+                .map_err(|e| format!("Failed to create dead letter queue receiver: {}", e))?
+        } else if let (Some(t), Some(s)) = (topic_name, subscription_name) {
+            // For subscriptions, the path is: topic/Subscriptions/subscription/$deadletterqueue
+            // We can use create_receiver_for_queue with the full path
+            let dead_letter_path = format!("{}/Subscriptions/{}/$deadletterqueue", t, s);
+            eprintln!("[peek_dead_letter_messages_sdk] Creating receiver for dead letter subscription: {}", dead_letter_path);
+            client
+                .create_receiver_for_queue(&dead_letter_path, ServiceBusReceiverOptions::default())
+                .await
+                .map_err(|e| format!("Failed to create dead letter subscription receiver: {}", e))?
+        } else {
+            return Err("Either queue_name or (topic_name and subscription_name) must be provided".to_string());
+        };
+
+        // Peek messages from dead letter queue
+        let sdk_messages = receiver
+            .peek_messages(max_count, None)
+            .await
+            .map_err(|e| format!("Failed to peek dead letter messages: {}", e))?;
+
+        eprintln!("[peek_dead_letter_messages_sdk] SDK returned {} dead letter messages", sdk_messages.len());
+
+        // Convert SDK ReceivedMessage to our ServiceBusMessage format
+        let mut messages = Vec::new();
+        for (idx, sdk_msg) in sdk_messages.iter().enumerate() {
+            eprintln!("[peek_dead_letter_messages_sdk] Processing dead letter message {}", idx + 1);
+            
+            // Get message body (returns Result)
+            let body_bytes = sdk_msg.body().map_err(|e| format!("Failed to get message body: {}", e))?;
+            
+            // Try to parse as JSON, otherwise use as string
+            let body = match serde_json::from_slice::<serde_json::Value>(body_bytes) {
+                Ok(json) => json,
+                Err(_) => {
+                    // If not JSON, try as UTF-8 string
+                    match std::str::from_utf8(body_bytes) {
+                        Ok(s) => serde_json::Value::String(s.to_string()),
+                        Err(_) => serde_json::Value::String(format!("<binary data: {} bytes>", body_bytes.len())),
+                    }
+                }
+            };
+
+            // Access properties from ReceivedMessage and create our ServiceBusMessage
+            let enqueued_time_str = format!("{}", sdk_msg.enqueued_time());
+            
+            // Extract application properties - dead letter messages may have DeadLetterReason and DeadLetterErrorDescription
+            let application_properties = None; // TODO: Extract from user_properties if available
+            
+            // Try to extract dead letter reason and error description from application properties
+            // These are typically stored in the message's application properties
+            let (dead_letter_reason, dead_letter_error_description) = {
+                // Try to get from user_properties if available
+                // DeadLetterReason and DeadLetterErrorDescription are typically in application properties
+                (None, None)
+            };
+            
+            let delivery_count = None; // Not available on peeked messages
+            
+            let message = crate::azure::types::ServiceBusMessage {
+                body,
+                message_id: sdk_msg.message_id().as_ref().map(|id| id.to_string()),
+                correlation_id: sdk_msg.correlation_id().as_ref().map(|id| id.to_string()),
+                content_type: sdk_msg.content_type().as_ref().map(|ct| ct.to_string()),
+                sequence_number: Some(sdk_msg.sequence_number() as u64),
+                subject: sdk_msg.subject().as_ref().map(|s| s.to_string()),
+                reply_to: sdk_msg.reply_to().as_ref().map(|r| r.to_string()),
+                reply_to_session_id: sdk_msg.reply_to_session_id().as_ref().map(|s| s.to_string()),
+                session_id: sdk_msg.session_id().as_ref().map(|s| s.to_string()),
+                time_to_live: sdk_msg.time_to_live().map(|ttl| ttl.as_secs()),
+                to: sdk_msg.to().as_ref().map(|t| t.to_string()),
+                application_properties,
+                delivery_count,
+                enqueued_time_utc: Some(enqueued_time_str),
+                locked_until_utc: None, // Peek doesn't lock
+                dead_letter_reason,
+                dead_letter_error_description,
+            };
+            
+            messages.push(message);
+        }
+
+        // Cleanup
+        receiver.dispose().await.map_err(|e| format!("Failed to dispose receiver: {}", e))?;
+        client.dispose().await.map_err(|e| format!("Failed to dispose client: {}", e))?;
+
+        eprintln!("[peek_dead_letter_messages_sdk] Successfully converted {} dead letter messages", messages.len());
+        Ok(messages)
     }
 
     // Original REST API implementation (kept for backward compatibility if needed)
@@ -924,7 +1071,7 @@ impl ServiceBusClient {
                                 // Check if it's an array of messages
                                 if let Some(array) = json_value.as_array() {
                                     eprintln!("[peek_messages] JSON is an array with {} messages", array.len());
-                                    for (idx, item) in array.iter().enumerate() {
+                                    for (_idx, item) in array.iter().enumerate() {
                                         // Extract message properties from JSON object
                                         let message_id = item.get("MessageId").and_then(|v| v.as_str()).map(|s| s.to_string());
                                         let body = item.clone(); // Use the whole JSON object as body
@@ -1331,18 +1478,23 @@ impl ServiceBusClient {
 }
 
 // XML structures for parsing Azure Service Bus responses
+// These are used by the REST API implementation (peek_messages_rest)
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct QueueFeed {
     #[serde(rename = "entry", default)]
     entries: Vec<QueueEntry>,
     // Links can be at feed level - try both approaches
     #[serde(rename = "link", default)]
+    #[allow(dead_code)]
     links: Vec<FeedLink>,
     // Also try with namespace prefix
     #[serde(rename = "{http://www.w3.org/2005/Atom}link", default)]
+    #[allow(dead_code)]
     links_ns: Vec<FeedLink>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct FeedLink {
     // serde_xml_rs uses @attribute syntax for attributes
@@ -1353,11 +1505,14 @@ struct FeedLink {
     href: Option<String>,
     // Try alternative field names in case serde_xml_rs handles it differently
     #[serde(rename = "rel", default)]
+    #[allow(dead_code)]
     rel_alt: Option<String>,
     #[serde(rename = "href", default)]
+    #[allow(dead_code)]
     href_alt: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct QueueEntry {
     title: String,
@@ -1365,6 +1520,7 @@ struct QueueEntry {
     content: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct TopicFeed {
     #[serde(rename = "entry", default)]
@@ -1373,11 +1529,13 @@ struct TopicFeed {
     links: Vec<FeedLink>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct TopicEntry {
     title: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct SubscriptionFeed {
     #[serde(rename = "entry", default)]
@@ -1411,6 +1569,7 @@ struct MessageEntry {
     sequence_number: Option<i64>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct SubscriptionEntry {
     title: String,

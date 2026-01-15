@@ -19,21 +19,23 @@ interface QueueMessagesPanelProps {
   queueName: string
   connection: ServiceBusConnection
   initialShowDeadLetter?: boolean
+  initialQueueProperties?: QueueProperties
   onClose?: () => void
   onQueueDeleted?: () => void
   onQueueUpdated?: () => void
 }
 
-export function QueueMessagesPanel({ queueName, connection, initialShowDeadLetter = false, onClose, onQueueDeleted, onQueueUpdated }: QueueMessagesPanelProps) {
+export function QueueMessagesPanel({ queueName, connection, initialShowDeadLetter = false, initialQueueProperties, onClose, onQueueDeleted, onQueueUpdated }: QueueMessagesPanelProps) {
   const { peekMessages, peekDeadLetterMessages, loading, error } = useMessages(connection)
   const { purgeQueue, refreshQueue, getQueue } = useQueues(connection)
   const [messages, setMessages] = useState<ServiceBusMessage[]>([])
   const [maxCount, setMaxCount] = useState(100)
   const [activeTab, setActiveTab] = useState<"active" | "deadletter">(initialShowDeadLetter ? "deadletter" : "active")
+  // Initialize with provided queue properties, or null if not provided
+  const [queueProperties, setQueueProperties] = useState<QueueProperties | null>(initialQueueProperties || null)
   const [purging, setPurging] = useState(false)
   const [showSendDialog, setShowSendDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
-  const [queueProperties, setQueueProperties] = useState<QueueProperties | null>(null)
 
   // Update activeTab when initialShowDeadLetter prop changes
   useEffect(() => {
@@ -56,26 +58,53 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
         const msgs = await peekMessages(queueName, maxCount)
         setMessages(msgs)
       }
+      // Don't refresh queue properties here - only update when messages are actually changed (send/receive/purge)
     } catch (err) {
       console.error("Failed to load messages:", err)
     }
   }, [queueName, activeTab, maxCount, connection, peekMessages, peekDeadLetterMessages])
 
-  // Load queue properties
+  // Update queue properties when initialQueueProperties prop changes or queueName changes
   useEffect(() => {
-    const loadQueueProperties = async () => {
-      if (!queueName) return
-      try {
-        const queue = await getQueue(queueName)
-        if (queue) {
-          setQueueProperties(queue)
+    console.log("QueueMessagesPanel useEffect:", {
+      queueName,
+      hasInitialQueueProperties: !!initialQueueProperties,
+      initialQueuePropertiesName: initialQueueProperties?.name,
+      initialActiveCount: initialQueueProperties?.activeMessageCount,
+      initialDeadLetterCount: initialQueueProperties?.deadLetterMessageCount
+    })
+    
+    // Always prefer initialQueueProperties if it exists and has the counts, regardless of name match
+    // This ensures we use the counts from the queue list
+    if (initialQueueProperties) {
+      // Use provided properties from the queue list
+      console.log("Setting queue properties from initialQueueProperties:", {
+        name: initialQueueProperties.name,
+        activeMessageCount: initialQueueProperties.activeMessageCount,
+        deadLetterMessageCount: initialQueueProperties.deadLetterMessageCount
+      })
+      setQueueProperties(initialQueueProperties)
+    } else {
+      // Fallback: load properties if not provided
+      const loadQueueProperties = async () => {
+        if (!queueName) return
+        try {
+          const queue = await getQueue(queueName)
+          if (queue) {
+            console.log("Setting queue properties from getQueue:", {
+              name: queue.name,
+              activeMessageCount: queue.activeMessageCount,
+              deadLetterMessageCount: queue.deadLetterMessageCount
+            })
+            setQueueProperties(queue)
+          }
+        } catch (err) {
+          console.error("Failed to load queue properties:", err)
         }
-      } catch (err) {
-        console.error("Failed to load queue properties:", err)
       }
+      loadQueueProperties()
     }
-    loadQueueProperties()
-  }, [queueName, getQueue])
+  }, [queueName, getQueue, initialQueueProperties])
 
   // Load messages when queueName, activeTab, maxCount, or connection changes
   useEffect(() => {
@@ -102,12 +131,16 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
       alert(`Successfully purged ${purgedCount} message${purgedCount !== 1 ? "s" : ""} from ${queueName}`)
       // Reload messages after purge
       await loadMessages()
-      // Refresh queue counts
+      // Refresh queue counts - this will update the queues list
       await refreshQueue(queueName)
-      // Reload queue properties to update badges
+      // Reload queue properties to update badges with fresh counts
       const queue = await getQueue(queueName)
       if (queue) {
         setQueueProperties(queue)
+      }
+      // Notify parent to refresh the queue list
+      if (onQueueUpdated) {
+        onQueueUpdated()
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error"
@@ -120,12 +153,16 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
   const handleSendSuccess = async () => {
     // Reload messages after sending
     await loadMessages()
-    // Refresh queue counts
+    // Refresh queue counts - this will update the queues list
     await refreshQueue(queueName)
-    // Reload queue properties to update badges
+    // Reload queue properties to update badges with fresh counts
     const queue = await getQueue(queueName)
     if (queue) {
       setQueueProperties(queue)
+    }
+    // Notify parent to refresh the queue list
+    if (onQueueUpdated) {
+      onQueueUpdated()
     }
   }
 
@@ -175,19 +212,27 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
             <TabsList>
               <TabsTrigger value="active" className="flex items-center gap-1.5">
                 Active
-                {queueProperties?.activeMessageCount !== undefined && queueProperties.activeMessageCount > 0 && (
-                  <Badge variant="secondary" className="h-4 px-1 text-xs">
-                    {queueProperties.activeMessageCount}
-                  </Badge>
-                )}
+                {(() => {
+                  const count = queueProperties?.activeMessageCount
+                  console.log("Rendering Active tab badge:", { count, queueProperties: queueProperties ? { name: queueProperties.name, activeMessageCount: queueProperties.activeMessageCount } : null })
+                  return count !== undefined && count > 0 ? (
+                    <Badge variant="secondary" className="h-4 px-1.5 text-xs min-w-[1.5rem] flex items-center justify-center">
+                      {count}
+                    </Badge>
+                  ) : null
+                })()}
               </TabsTrigger>
               <TabsTrigger value="deadletter" className="flex items-center gap-1.5">
                 Dead Letter
-                {queueProperties?.deadLetterMessageCount !== undefined && queueProperties.deadLetterMessageCount > 0 && (
-                  <Badge variant="destructive" className="h-4 px-1 text-xs">
-                    {queueProperties.deadLetterMessageCount}
-                  </Badge>
-                )}
+                {(() => {
+                  const count = queueProperties?.deadLetterMessageCount
+                  console.log("Rendering Dead Letter tab badge:", { count, queueProperties: queueProperties ? { name: queueProperties.name, deadLetterMessageCount: queueProperties.deadLetterMessageCount } : null })
+                  return count !== undefined && count > 0 ? (
+                    <Badge variant="destructive" className="h-4 px-1.5 text-xs min-w-[1.5rem] flex items-center justify-center">
+                      {count}
+                    </Badge>
+                  ) : null
+                })()}
               </TabsTrigger>
             </TabsList>
           </Tabs>

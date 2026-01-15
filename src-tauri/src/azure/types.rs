@@ -19,6 +19,7 @@ pub struct ServiceBusConnection {
     pub updated_at: i64,
 }
 
+#[allow(dead_code)] // Used by main app, not test binary
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueProperties {
@@ -59,6 +60,7 @@ pub struct QueueProperties {
     pub size_in_bytes: Option<u64>,
 }
 
+#[allow(dead_code)] // Used by main app, not test binary
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TopicProperties {
     pub name: String,
@@ -80,6 +82,7 @@ pub struct TopicProperties {
     pub subscription_count: Option<u64>,
 }
 
+#[allow(dead_code)] // Used by main app, not test binary
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscriptionProperties {
@@ -110,6 +113,7 @@ pub struct SubscriptionProperties {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ServiceBusMessage {
     pub body: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
