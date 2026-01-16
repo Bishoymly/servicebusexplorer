@@ -32,8 +32,7 @@ class ApiClient {
     // If connection string is missing, try to load it from Keychain
     if (!connection.connectionString && connection.id) {
       try {
-        const { getConnectionString } = await import("@/lib/storage/connections")
-        const connStr = await getConnectionString(connection.id)
+        const connStr = await invoke<string>("get_connection_string", { connectionId: connection.id })
         if (connStr) {
           return { ...connection, connectionString: connStr }
         }

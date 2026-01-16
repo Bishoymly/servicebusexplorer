@@ -51,7 +51,9 @@ export function useTreeData(
 
   const loadConnectionData = useCallback(async (connectionId: string) => {
     const connection = connections.find(c => c.id === connectionId)
-    if (!connection) return
+    if (!connection) {
+      return
+    }
 
     setLoading(prev => ({ ...prev, [connectionId]: true }))
     setConnectionErrors(prev => ({ ...prev, [connectionId]: false }))
@@ -362,6 +364,34 @@ export function useTreeData(
     // Just reload the data
     loadConnectionData(connectionId)
   }, [loadConnectionData])
+
+  // Update a single queue in the tree data without refreshing everything
+  const updateQueueInTree = useCallback(async (connectionId: string, queueName: string) => {
+    const connection = connections.find(c => c.id === connectionId)
+    if (!connection) return
+
+    try {
+      const updatedQueue = await apiClient.getQueue(connection, queueName)
+      setConnectionData(prev => {
+        const currentData = prev[connectionId]
+        if (!currentData) return prev
+
+        const updatedQueues = currentData.queues.map(q => 
+          q.name === queueName ? updatedQueue : q
+        )
+        
+        return {
+          ...prev,
+          [connectionId]: {
+            ...currentData,
+            queues: updatedQueues,
+          },
+        }
+      })
+    } catch (err) {
+      console.error(`Failed to update queue ${queueName} in tree:`, err)
+    }
+  }, [connections])
 
   const treeNodes = React.useMemo(() => {
     return connections.map(connection => {
@@ -751,6 +781,7 @@ export function useTreeData(
     treeNodes,
     loading,
     refreshConnection,
+    updateQueueInTree,
   }
 }
 

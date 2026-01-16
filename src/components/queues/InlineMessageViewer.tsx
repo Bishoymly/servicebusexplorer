@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Send, ChevronDown, ChevronUp, Copy, Check } from "lucide-react"
 import type { ServiceBusMessage } from "@/types/azure"
+import { formatDateSafe } from "@/lib/utils"
 import {
   Table,
   TableBody,
@@ -88,10 +89,16 @@ export function InlineMessageViewer({ message, onResend }: InlineMessageViewerPr
   const language = isJSON ? "json" : message.contentType?.includes("json") ? "json" : "text"
   const syntaxTheme = isDarkMode ? vscDarkPlus : coy
 
-  const formatDate = (date: Date | undefined): string => {
+  const formatDate = (date: string | Date | undefined): string => {
     if (!date) return "-"
-    const d = new Date(date)
-    return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    // Try to parse and format
+    const d = date instanceof Date ? date : new Date(date)
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+    // If parsing fails, try formatDateSafe which returns the original string
+    const safe = formatDateSafe(date)
+    return safe || "-"
   }
 
   // Important properties to show in collapsed view (prioritized)
@@ -101,7 +108,7 @@ export function InlineMessageViewer({ message, onResend }: InlineMessageViewerPr
     { label: "Subject", value: message.subject, isMono: false },
     { label: "Delivery Count", value: message.deliveryCount, isMono: false },
     { label: "Sequence Number", value: message.sequenceNumber, isMono: true },
-    { label: "Enqueued Time", value: message.enqueuedTimeUtc ? new Date(message.enqueuedTimeUtc).toLocaleString() : undefined, isMono: false },
+    { label: "Enqueued Time", value: message.enqueuedTimeUtc ? formatDateSafe(message.enqueuedTimeUtc) || undefined : undefined, isMono: false },
   ].filter(prop => prop.value !== undefined && prop.value !== null && prop.value !== "")
 
   return (
@@ -287,7 +294,7 @@ export function InlineMessageViewer({ message, onResend }: InlineMessageViewerPr
                       {message.lockedUntilUtc && (
                         <TableRow>
                           <TableCell className="text-muted-foreground text-xs">Locked Until</TableCell>
-                          <TableCell className="text-xs">{new Date(message.lockedUntilUtc).toLocaleString()}</TableCell>
+                          <TableCell className="text-xs">{formatDateSafe(message.lockedUntilUtc) || "N/A"}</TableCell>
                         </TableRow>
                       )}
                       {message.timeToLive !== undefined && (

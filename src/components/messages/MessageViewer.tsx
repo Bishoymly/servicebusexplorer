@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator"
 import { Send } from "lucide-react"
 import type { ServiceBusMessage } from "@/types/azure"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { formatDateSafe } from "@/lib/utils"
 
 interface MessageViewerProps {
   message: ServiceBusMessage
@@ -89,13 +90,13 @@ export function MessageViewer({ message, open, onOpenChange, onResend }: Message
                 {message.enqueuedTimeUtc && (
                   <div>
                     <label className="text-muted-foreground">Enqueued Time</label>
-                    <p className="font-medium">{new Date(message.enqueuedTimeUtc).toLocaleString()}</p>
+                    <p className="font-medium">{formatDateSafe(message.enqueuedTimeUtc) || "N/A"}</p>
                   </div>
                 )}
                 {message.lockedUntilUtc && (
                   <div>
                     <label className="text-muted-foreground">Locked Until</label>
-                    <p className="font-medium">{new Date(message.lockedUntilUtc).toLocaleString()}</p>
+                    <p className="font-medium">{formatDateSafe(message.lockedUntilUtc) || "N/A"}</p>
                   </div>
                 )}
                 {message.deadLetterReason && (

@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Send, Eye } from "lucide-react"
 import type { ServiceBusMessage } from "@/types/azure"
-import { cn } from "@/lib/utils"
+import { cn, formatDateSafe } from "@/lib/utils"
 
 interface MessageCardProps {
   message: ServiceBusMessage
@@ -37,7 +37,7 @@ export function MessageCard({ message, onClick, onResend }: MessageCardProps) {
             <p className="text-sm text-muted-foreground line-clamp-2">{bodyPreview}...</p>
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
               {message.enqueuedTimeUtc && (
-                <span>Enqueued: {new Date(message.enqueuedTimeUtc).toLocaleString()}</span>
+                <span>Enqueued: {formatDateSafe(message.enqueuedTimeUtc) || "N/A"}</span>
               )}
               {message.deliveryCount !== undefined && (
                 <span>Delivery Count: {message.deliveryCount}</span>

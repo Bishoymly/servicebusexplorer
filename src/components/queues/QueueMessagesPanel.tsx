@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { RefreshCw, Trash2, Send, X, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -10,10 +10,19 @@ import { MessageEditor } from "@/components/messages/MessageEditor"
 import { QueueSettingsForm } from "./QueueSettingsForm"
 import { useMessages } from "@/hooks/useMessages"
 import { useQueues } from "@/hooks/useQueues"
+import { useTreeRefresh } from "@/contexts/TreeRefreshContext"
 import type { ServiceBusMessage, ServiceBusConnection, QueueProperties } from "@/types/azure"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog"
 
 interface QueueMessagesPanelProps {
   queueName: string
@@ -28,6 +37,7 @@ interface QueueMessagesPanelProps {
 export function QueueMessagesPanel({ queueName, connection, initialShowDeadLetter = false, initialQueueProperties, onClose, onQueueDeleted, onQueueUpdated }: QueueMessagesPanelProps) {
   const { peekMessages, peekDeadLetterMessages, loading, error } = useMessages(connection)
   const { purgeQueue, refreshQueue, getQueue } = useQueues(connection)
+  const { updateQueueInTree } = useTreeRefresh()
   const [messages, setMessages] = useState<ServiceBusMessage[]>([])
   const [maxCount, setMaxCount] = useState(100)
   const [activeTab, setActiveTab] = useState<"active" | "deadletter">(initialShowDeadLetter ? "deadletter" : "active")
@@ -36,13 +46,35 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
   const [purging, setPurging] = useState(false)
   const [showSendDialog, setShowSendDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
+  const [showPurgeConfirmDialog, setShowPurgeConfirmDialog] = useState(false)
+  const manuallyRefreshedRef = useRef(false)
+  const lastSyncedCountsRef = useRef<{ active: number; deadLetter: number } | null>(null)
+  const onQueueUpdatedRef = useRef(onQueueUpdated)
+  
+  // Keep ref updated
+  useEffect(() => {
+    onQueueUpdatedRef.current = onQueueUpdated
+  }, [onQueueUpdated])
 
   // Update activeTab when initialShowDeadLetter prop changes
   useEffect(() => {
     setActiveTab(initialShowDeadLetter ? "deadletter" : "active")
   }, [initialShowDeadLetter])
 
-  const loadMessages = useCallback(async () => {
+  // Reset purging state when queueName changes (user switches queues) or component unmounts
+  useEffect(() => {
+    setPurging(false)
+    setShowPurgeConfirmDialog(false)
+    manuallyRefreshedRef.current = false // Reset manual refresh flag when queue changes
+    
+    // Cleanup function to reset state on unmount
+    return () => {
+      setPurging(false)
+      setShowPurgeConfirmDialog(false)
+    }
+  }, [queueName])
+
+  const loadMessages = useCallback(async (refreshProperties: boolean = false) => {
     // Don't load if connection is not ready
     if (!connection || !queueName) {
       return
@@ -50,35 +82,103 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
     
     setMessages([])
     try {
+      let msgs: ServiceBusMessage[] = []
       if (activeTab === "deadletter") {
-        const msgs = await peekDeadLetterMessages(queueName, undefined, maxCount)
+        msgs = await peekDeadLetterMessages(queueName, undefined, maxCount)
         setMessages(msgs)
       } else {
         // Active messages - peek regular messages
-        const msgs = await peekMessages(queueName, maxCount)
+        msgs = await peekMessages(queueName, maxCount)
         setMessages(msgs)
       }
-      // Don't refresh queue properties here - only update when messages are actually changed (send/receive/purge)
+      
+      // Refresh queue properties if requested (e.g., when user clicks refresh button)
+      if (refreshProperties) {
+        // Check if we got maxCount messages - if so, don't update counts (might be hitting limit)
+        const messageCount = msgs.length
+        const hitMaxCount = messageCount >= maxCount
+        
+        if (hitMaxCount) {
+          console.log("[loadMessages] Got maxCount messages, skipping queue property update (count might be inaccurate)")
+          return
+        }
+        
+        // Get updated queue properties
+        const queue = await getQueue(queueName)
+        if (queue) {
+          // Only update if counts are different from what we currently have
+          // Use functional update to read current state without including it in dependencies
+          let shouldUpdate = false
+          setQueueProperties(current => {
+            const currentActiveCount = current?.activeMessageCount ?? 0
+            const currentDeadLetterCount = current?.deadLetterMessageCount ?? 0
+            const newActiveCount = queue.activeMessageCount ?? 0
+            const newDeadLetterCount = queue.deadLetterMessageCount ?? 0
+            
+            const countsChanged = 
+              currentActiveCount !== newActiveCount ||
+              currentDeadLetterCount !== newDeadLetterCount
+            
+            if (!countsChanged) {
+              console.log("[loadMessages] Queue counts unchanged, skipping update:", {
+                activeMessageCount: newActiveCount,
+                deadLetterMessageCount: newDeadLetterCount
+              })
+              return current // No change, return current state
+            }
+            
+            console.log("[loadMessages] Refreshing queue properties (counts changed):", {
+              name: queue.name,
+              oldActiveCount: currentActiveCount,
+              newActiveCount: newActiveCount,
+              oldDeadLetterCount: currentDeadLetterCount,
+              newDeadLetterCount: newDeadLetterCount
+            })
+            shouldUpdate = true
+            manuallyRefreshedRef.current = true // Mark as manually refreshed
+            return queue
+          })
+          
+          // Only do the expensive operations if we actually updated
+          if (shouldUpdate) {
+            // Update in useQueues hook
+            await refreshQueue(queueName)
+            
+            // Update tree (this will also call getQueue, but that's okay for consistency)
+            if (updateQueueInTree && connection?.id) {
+              try {
+                await updateQueueInTree(connection.id, queueName)
+              } catch (err) {
+                console.warn("Could not update queue in tree:", err)
+              }
+            }
+            
+          // Notify parent to refresh (this will update the parent's queueProperties prop)
+          // Use ref to avoid including onQueueUpdated in dependencies
+          if (onQueueUpdatedRef.current) {
+            onQueueUpdatedRef.current()
+          }
+          }
+        }
+      }
     } catch (err) {
       console.error("Failed to load messages:", err)
     }
-  }, [queueName, activeTab, maxCount, connection, peekMessages, peekDeadLetterMessages])
+  }, [queueName, activeTab, maxCount, connection, peekMessages, peekDeadLetterMessages, refreshQueue, getQueue, updateQueueInTree])
 
-  // Update queue properties when initialQueueProperties prop changes or queueName changes
+  // Update queue properties when queueName changes (not when initialQueueProperties changes)
+  // This prevents overriding manual refreshes
   useEffect(() => {
-    console.log("QueueMessagesPanel useEffect:", {
-      queueName,
-      hasInitialQueueProperties: !!initialQueueProperties,
-      initialQueuePropertiesName: initialQueueProperties?.name,
-      initialActiveCount: initialQueueProperties?.activeMessageCount,
-      initialDeadLetterCount: initialQueueProperties?.deadLetterMessageCount
-    })
+    // Skip if we don't have a queueName yet
+    if (!queueName) return
     
-    // Always prefer initialQueueProperties if it exists and has the counts, regardless of name match
-    // This ensures we use the counts from the queue list
+    // Reset manual refresh flag and last synced counts when queue changes
+    manuallyRefreshedRef.current = false
+    lastSyncedCountsRef.current = null
+    
+    // Use initialQueueProperties if available, otherwise load
     if (initialQueueProperties) {
-      // Use provided properties from the queue list
-      console.log("Setting queue properties from initialQueueProperties:", {
+      console.log("Setting queue properties from initialQueueProperties (queueName changed):", {
         name: initialQueueProperties.name,
         activeMessageCount: initialQueueProperties.activeMessageCount,
         deadLetterMessageCount: initialQueueProperties.deadLetterMessageCount
@@ -87,11 +187,10 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
     } else {
       // Fallback: load properties if not provided
       const loadQueueProperties = async () => {
-        if (!queueName) return
         try {
           const queue = await getQueue(queueName)
           if (queue) {
-            console.log("Setting queue properties from getQueue:", {
+            console.log("Setting queue properties from getQueue (queueName changed):", {
               name: queue.name,
               activeMessageCount: queue.activeMessageCount,
               deadLetterMessageCount: queue.deadLetterMessageCount
@@ -104,48 +203,176 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
       }
       loadQueueProperties()
     }
-  }, [queueName, getQueue, initialQueueProperties])
+  }, [queueName, getQueue]) // Only depend on queueName, not initialQueueProperties
+  
+  // Sync with initialQueueProperties when it changes (but only if we haven't manually refreshed)
+  // Use a ref to track the last synced counts to avoid infinite loops
+  useEffect(() => {
+    if (!queueName || !initialQueueProperties) return
+    
+    const newActiveCount = initialQueueProperties.activeMessageCount || 0
+    const newDeadLetterCount = initialQueueProperties.deadLetterMessageCount || 0
+    
+    // Check if this is the same as what we last synced
+    if (lastSyncedCountsRef.current &&
+        lastSyncedCountsRef.current.active === newActiveCount &&
+        lastSyncedCountsRef.current.deadLetter === newDeadLetterCount) {
+      // Already synced with these counts, skip
+      return
+    }
+    
+    // Only sync if we haven't manually refreshed
+    if (!manuallyRefreshedRef.current) {
+      console.log("Syncing queue properties from initialQueueProperties:", {
+        name: initialQueueProperties.name,
+        activeMessageCount: newActiveCount,
+        deadLetterMessageCount: newDeadLetterCount
+      })
+      setQueueProperties(initialQueueProperties)
+      lastSyncedCountsRef.current = {
+        active: newActiveCount,
+        deadLetter: newDeadLetterCount
+      }
+    } else {
+      // We manually refreshed, but check if counts are significantly different
+      // (meaning the parent was updated from elsewhere)
+      // Use functional update to read current state without including it in dependencies
+      setQueueProperties(current => {
+        const currentActiveCount = current?.activeMessageCount ?? 0
+        const currentDeadLetterCount = current?.deadLetterMessageCount ?? 0
+        
+        const countsDifferent = 
+          currentActiveCount !== newActiveCount ||
+          currentDeadLetterCount !== newDeadLetterCount
+        
+        if (countsDifferent) {
+          console.log("Syncing queue properties from initialQueueProperties (counts changed after manual refresh):", {
+            name: initialQueueProperties.name,
+            oldActiveCount: currentActiveCount,
+            newActiveCount: newActiveCount,
+            oldDeadLetterCount: currentDeadLetterCount,
+            newDeadLetterCount: newDeadLetterCount
+          })
+          lastSyncedCountsRef.current = {
+            active: newActiveCount,
+            deadLetter: newDeadLetterCount
+          }
+          manuallyRefreshedRef.current = false // Reset after syncing
+          return initialQueueProperties
+        }
+        return current // No change, return current state
+      })
+    }
+  }, [initialQueueProperties, queueName]) // Removed queueProperties from dependencies to prevent infinite loop
 
   // Load messages when queueName, activeTab, maxCount, or connection changes
+  // Don't depend on loadMessages itself to avoid infinite loops - use direct dependencies
   useEffect(() => {
-    loadMessages()
-  }, [loadMessages])
+    if (!connection || !queueName) return
+    
+    const load = async () => {
+      setMessages([])
+      try {
+        let msgs: ServiceBusMessage[] = []
+        if (activeTab === "deadletter") {
+          msgs = await peekDeadLetterMessages(queueName, undefined, maxCount)
+          setMessages(msgs)
+        } else {
+          msgs = await peekMessages(queueName, maxCount)
+          setMessages(msgs)
+        }
+      } catch (err) {
+        console.error("Failed to load messages:", err)
+      }
+    }
+    
+    load()
+  }, [queueName, activeTab, maxCount, connection, peekMessages, peekDeadLetterMessages])
 
   const handleResend = async (message: ServiceBusMessage) => {
     // TODO: Implement resend functionality
     console.log("Resend message:", message)
   }
 
-  const handlePurge = async () => {
-    const confirmMessage = activeTab === "deadletter"
-      ? `Are you sure you want to purge all dead letter messages from "${queueName}"? This action cannot be undone.`
-      : `Are you sure you want to purge all messages from "${queueName}"? This action cannot be undone.`
+  const handlePurgeClick = () => {
+    console.log("[handlePurgeClick] Button clicked, activeTab:", activeTab)
+    setShowPurgeConfirmDialog(true)
+  }
+
+  const handlePurgeConfirm = async () => {
+    console.log("[handlePurgeConfirm] Confirming purge, activeTab:", activeTab, "queueName:", queueName)
+    setShowPurgeConfirmDialog(false)
+    setPurging(true)
     
-    if (!confirm(confirmMessage)) {
+    const isDeadLetter = activeTab === "deadletter"
+    let purgedCount = 0
+    let purgeError: Error | null = null
+    
+    try {
+      console.log("[handlePurgeConfirm] Calling purgeQueue with:", { queueName, isDeadLetter })
+      purgedCount = await purgeQueue(queueName, isDeadLetter)
+      console.log("[handlePurgeConfirm] Purged count:", purgedCount)
+    } catch (err: unknown) {
+      console.error("[handlePurgeConfirm] Purge error:", err)
+      purgeError = err instanceof Error ? err : new Error(String(err))
+    }
+    
+    if (purgeError) {
+      // Reset purging state on error
+      setPurging(false)
+      const errorMessage = purgeError.message || "Unknown error"
+      setTimeout(() => {
+        alert(`Failed to purge queue: ${errorMessage}`)
+      }, 100)
       return
     }
-
-    setPurging(true)
+    
+    // Show success message (non-blocking)
+    const successMessage = `Successfully purged ${purgedCount} message${purgedCount !== 1 ? "s" : ""} from ${queueName}`
+    setTimeout(() => {
+      alert(successMessage)
+    }, 100)
+    
     try {
-      const purgedCount = await purgeQueue(queueName, activeTab === "deadletter")
-      alert(`Successfully purged ${purgedCount} message${purgedCount !== 1 ? "s" : ""} from ${queueName}`)
-      // Reload messages after purge
-      await loadMessages()
-      // Refresh queue counts - this will update the queues list
-      await refreshQueue(queueName)
-      // Reload queue properties to update badges with fresh counts
+      // Reload messages immediately after purge (don't refresh properties here to avoid redundant calls)
+      await loadMessages(false)
+      
+      // Wait a moment for Azure to update counts (reduced from 500ms)
+      await new Promise(resolve => setTimeout(resolve, 300))
+      
+      // Get updated queue once - this will be used for all updates
+      // Note: refreshQueue and updateQueueInTree will also call getQueue, but that's acceptable
+      // to ensure consistency. The main optimization is avoiding full list refreshes.
       const queue = await getQueue(queueName)
       if (queue) {
         setQueueProperties(queue)
-      }
-      // Notify parent to refresh the queue list
-      if (onQueueUpdated) {
-        onQueueUpdated()
+        
+        // Update in useQueues hook (calls getQueue again, but that's okay for consistency)
+        await refreshQueue(queueName)
+        
+        // Update tree (calls getQueue again, but that's okay for consistency)
+        if (updateQueueInTree && connection?.id) {
+          console.log("[handlePurgeConfirm] Updating queue in tree:", { connectionId: connection.id, queueName })
+          try {
+            await updateQueueInTree(connection.id, queueName)
+          } catch (err) {
+            console.warn("[handlePurgeConfirm] Could not update queue in tree:", err)
+          }
+        }
+        
+        // Notify parent to refresh (this will update the parent's queueProperties prop)
+        // Do this last to avoid triggering multiple refreshes
+        // IMPORTANT: This should NOT trigger refreshConnection or loadConnectionData
+        if (onQueueUpdatedRef.current) {
+          console.log("[handlePurgeConfirm] Calling onQueueUpdated")
+          onQueueUpdatedRef.current()
+        }
       }
     } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : "Unknown error"
-      alert(`Failed to purge queue: ${errorMessage}`)
+      console.error("[handlePurgeConfirm] Error refreshing after purge:", err)
+      // Don't show another alert, just log the error
     } finally {
+      // Always reset purging state after all operations complete
       setPurging(false)
     }
   }
@@ -261,7 +488,7 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
             <Button
               variant="destructive"
               size="sm"
-              onClick={handlePurge}
+              onClick={handlePurgeClick}
               disabled={purging || loading}
             >
               <Trash2 className={`h-4 w-4 mr-2 ${purging ? "animate-spin" : ""}`} />
@@ -279,7 +506,7 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
               min={1}
               max={1000}
             />
-            <Button variant="outline" size="sm" onClick={loadMessages} disabled={loading}>
+            <Button variant="outline" size="sm" onClick={() => loadMessages(true)} disabled={loading}>
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             </Button>
           </div>
@@ -337,6 +564,38 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
           onDelete={handleQueueDeleted}
         />
       )}
+
+      {/* Purge Confirmation Dialog */}
+      <Dialog open={showPurgeConfirmDialog} onOpenChange={setShowPurgeConfirmDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>
+              Purge {activeTab === "deadletter" ? "Dead Letter Messages" : "Queue Messages"}
+            </DialogTitle>
+            <DialogDescription>
+              {activeTab === "deadletter"
+                ? `Are you sure you want to purge all dead letter messages from "${queueName}"? This action cannot be undone.`
+                : `Are you sure you want to purge all messages from "${queueName}"? This action cannot be undone.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowPurgeConfirmDialog(false)}
+              disabled={purging}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handlePurgeConfirm}
+              disabled={purging}
+            >
+              {purging ? "Purging..." : "Purge"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

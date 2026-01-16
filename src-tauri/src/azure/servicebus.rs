@@ -6,6 +6,7 @@ use crate::azure::types::*;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_xml_rs::from_str;
+use std::time::Duration;
 
 const API_VERSION: &str = "2021-05";
 
@@ -82,6 +83,13 @@ impl ServiceBusClient {
     fn get_base_url(&self) -> String {
         format!("https://{}{}", self.namespace, self.endpoint_domain)
     }
+
+    // ============================================================================
+    // Management Operations (REST API)
+    // ============================================================================
+    // These operations use REST API because azservicebus SDK does not support
+    // management operations (CRUD for queues, topics, subscriptions).
+    // ============================================================================
 
     // Queue operations
     pub async fn list_queues(&self) -> Result<Vec<QueueProperties>, String> {
@@ -600,8 +608,14 @@ impl ServiceBusClient {
         Ok(())
     }
 
-    // Message operations
-    // New implementation using azservicebus SDK for proper batch peeking
+    // ============================================================================
+    // Message Operations (azservicebus SDK)
+    // ============================================================================
+    // These operations use the azservicebus SDK for better performance,
+    // reliability, and proper AMQP-based message handling.
+    // ============================================================================
+
+    // Peek messages using azservicebus SDK
     pub async fn peek_messages_sdk(
         &self,
         queue_name: Option<&str>,
@@ -732,7 +746,7 @@ impl ServiceBusClient {
         Ok(messages)
     }
 
-    // Main peek_messages method - uses SDK by default for proper batch peeking
+    // Main peek_messages method - delegates to SDK implementation
     pub async fn peek_messages(
         &self,
         queue_name: Option<&str>,
@@ -744,7 +758,7 @@ impl ServiceBusClient {
         self.peek_messages_sdk(queue_name, topic_name, subscription_name, max_count).await
     }
 
-    // Peek messages from dead letter queue using SDK
+    // Peek messages from dead letter queue using azservicebus SDK
     pub async fn peek_dead_letter_messages_sdk(
         &self,
         queue_name: Option<&str>,
@@ -1248,12 +1262,28 @@ impl ServiceBusClient {
         Ok(message)
     }
 
+    // Send message using azservicebus SDK
     pub async fn send_message(
         &self,
         queue_name: Option<&str>,
         topic_name: Option<&str>,
         message: &ServiceBusMessage,
     ) -> Result<(), String> {
+        use azservicebus::prelude::*;
+        
+        let connection_string = if let Some(ref parsed) = self.parsed_connection {
+            // Reconstruct connection string from parsed components
+            format!(
+                "Endpoint=sb://{}{}/;SharedAccessKeyName={};SharedAccessKey={}",
+                self.namespace,
+                self.endpoint_domain,
+                parsed.shared_access_key_name,
+                parsed.shared_access_key
+            )
+        } else {
+            return Err("Connection string not available for SDK".to_string());
+        };
+
         let entity_path = if let Some(q) = queue_name {
             q.to_string()
         } else if let Some(t) = topic_name {
@@ -1262,46 +1292,227 @@ impl ServiceBusClient {
             return Err("Either queue_name or topic_name must be provided".to_string());
         };
 
-        let url = format!("{}/{}/messages?api-version={}", self.get_base_url(), entity_path, API_VERSION);
-        let auth_header = self.get_auth_header(&url).await?;
+        eprintln!("[send_message] Using azservicebus SDK to send message to: {}", entity_path);
 
-        // Build message headers
-        let mut headers = reqwest::header::HeaderMap::new();
+        // Create ServiceBus client
+        let mut client = ServiceBusClient::new_from_connection_string(
+            &connection_string,
+            ServiceBusClientOptions::default(),
+        )
+        .await
+        .map_err(|e| format!("Failed to create ServiceBus client: {}", e))?;
+
+        // Create sender for queue or topic
+        let mut sender = client
+            .create_sender(&entity_path, ServiceBusSenderOptions::default())
+            .await
+            .map_err(|e| format!("Failed to create sender: {}", e))?;
+
+        // Convert message body to bytes
+        let body_bytes = match &message.body {
+            serde_json::Value::String(s) => s.as_bytes().to_vec(),
+            serde_json::Value::Object(_) | serde_json::Value::Array(_) => {
+                serde_json::to_vec(&message.body)
+                    .map_err(|e| format!("Failed to serialize message body: {}", e))?
+            }
+            serde_json::Value::Number(n) => n.to_string().as_bytes().to_vec(),
+            serde_json::Value::Bool(b) => b.to_string().as_bytes().to_vec(),
+            serde_json::Value::Null => Vec::new(),
+        };
+
+        // Create SDK message
+        let mut sdk_message = ServiceBusMessage::new(body_bytes);
+
+        // Set message properties
+        // Note: Some setters return Result, others return () - handle accordingly
         if let Some(msg_id) = &message.message_id {
-            headers.insert("BrokerProperties", format!(r#"{{"MessageId":"{}"}}"#, msg_id).parse().unwrap());
+            sdk_message.set_message_id(msg_id.clone())
+                .map_err(|e| format!("Failed to set message_id: {}", e))?;
         }
         if let Some(content_type) = &message.content_type {
-            headers.insert("Content-Type", content_type.parse().unwrap());
+            sdk_message.set_content_type(content_type.clone());
         }
+        if let Some(corr_id) = &message.correlation_id {
+            sdk_message.set_correlation_id(corr_id.clone());
+        }
+        if let Some(session_id) = &message.session_id {
+            sdk_message.set_session_id(session_id.clone())
+                .map_err(|e| format!("Failed to set session_id: {}", e))?;
+        }
+        if let Some(reply_to) = &message.reply_to {
+            sdk_message.set_reply_to(reply_to.clone());
+        }
+        if let Some(reply_to_session_id) = &message.reply_to_session_id {
+            sdk_message.set_reply_to_session_id(reply_to_session_id.clone())
+                .map_err(|e| format!("Failed to set reply_to_session_id: {}", e))?;
+        }
+        if let Some(subject) = &message.subject {
+            sdk_message.set_subject(subject.clone());
+        }
+        if let Some(ttl) = message.time_to_live {
+            sdk_message.set_time_to_live(std::time::Duration::from_secs(ttl))
+                .map_err(|e| format!("Failed to set time_to_live: {}", e))?;
+        }
+        if let Some(to) = &message.to {
+            sdk_message.set_to(to.clone());
+        }
+        // Note: azservicebus SDK doesn't currently support setting application properties
+        // directly on ServiceBusMessage. If application properties are needed, they would
+        // need to be included in the message body or the SDK would need to be updated.
+        // For now, we skip setting application_properties from the message.
 
-        let body = serde_json::to_string(&message.body).map_err(|e| format!("Failed to serialize message body: {}", e))?;
-
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", &auth_header)
-            .headers(headers)
-            .body(body)
-            .send()
+        // Send the message
+        sender
+            .send_message(sdk_message)
             .await
             .map_err(|e| format!("Failed to send message: {}", e))?;
 
-        let status = response.status();
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(format!("Failed to send message: {} - {}", status, error_text));
-        }
+        eprintln!("[send_message] Message sent successfully");
+
+        // Cleanup
+        sender.dispose().await.map_err(|e| format!("Failed to dispose sender: {}", e))?;
+        client.dispose().await.map_err(|e| format!("Failed to dispose client: {}", e))?;
 
         Ok(())
     }
 
-    pub async fn purge_queue(&self, _queue_name: &str, _purge_dead_letter: bool) -> Result<u32, String> {
-        // Purge by receiving and completing messages
-        // This is a simplified implementation
-        // Full implementation would use receive-lock-complete pattern
-        Ok(0) // Placeholder
+    // Purge queue by receiving and completing messages using azservicebus SDK
+    pub async fn purge_queue(&self, queue_name: &str, purge_dead_letter: bool) -> Result<u32, String> {
+        use azservicebus::prelude::*;
+        
+        let connection_string = if let Some(ref parsed) = self.parsed_connection {
+            // Reconstruct connection string from parsed components
+            format!(
+                "Endpoint=sb://{}{}/;SharedAccessKeyName={};SharedAccessKey={}",
+                self.namespace,
+                self.endpoint_domain,
+                parsed.shared_access_key_name,
+                parsed.shared_access_key
+            )
+        } else {
+            return Err("Connection string not available for SDK".to_string());
+        };
+
+        // Create ServiceBus client with longer timeout to ensure we can receive existing messages
+        use azservicebus::ServiceBusRetryOptions;
+        let mut client_options = ServiceBusClientOptions::default();
+        // Increase try_timeout to ensure receive_messages has enough time to get existing messages
+        // Default might be too short and cause timeouts before existing messages are returned
+        client_options.retry_options = ServiceBusRetryOptions {
+            try_timeout: Duration::from_secs(30), // 30 second timeout for operations
+            ..ServiceBusRetryOptions::default()
+        };
+        
+        let mut client = ServiceBusClient::new_from_connection_string(
+            &connection_string,
+            client_options,
+        )
+        .await
+        .map_err(|e| format!("Failed to create ServiceBus client: {}", e))?;
+
+        // Create receiver options with subQueue for dead letter if needed
+        // Use ReceiveAndDelete mode for purging - messages are automatically deleted when received
+        // This is more efficient than PeekLock + complete, and avoids issues with receive_messages timing out
+        let receiver_options = if purge_dead_letter {
+            ServiceBusReceiverOptions {
+                sub_queue: azservicebus::SubQueue::DeadLetter,
+                receive_mode: azservicebus::ServiceBusReceiveMode::ReceiveAndDelete,
+                prefetch_count: 0, // No prefetch - we'll receive explicitly
+                identifier: None,
+            }
+        } else {
+            ServiceBusReceiverOptions {
+                receive_mode: azservicebus::ServiceBusReceiveMode::ReceiveAndDelete,
+                prefetch_count: 0, // No prefetch - we'll receive explicitly
+                sub_queue: azservicebus::SubQueue::None,
+                identifier: None,
+            }
+        };
+
+        // Create receiver for the queue (or dead letter queue)
+        let mut receiver = client
+            .create_receiver_for_queue(queue_name, receiver_options)
+            .await
+            .map_err(|e| format!("Failed to create receiver: {}", e))?;
+        
+        // First, peek to verify there are messages to purge
+        let peek_result = receiver.peek_messages(10, None).await;
+        match peek_result {
+            Ok(peeked_msgs) => {
+                if peeked_msgs.is_empty() {
+                    return Ok(0);
+                }
+            },
+            Err(_) => {
+                // Continue even if peek fails - will try to receive anyway
+            }
+        }
+
+        let mut purged_count = 0u32;
+        let batch_size = 100u32; // Process messages in batches of 100
+        let max_iterations = 100u32; // Safety limit to prevent infinite loops
+        let mut iteration = 0u32;
+        let mut consecutive_empty_receives = 0u32;
+        let max_consecutive_empty = 3u32; // Stop after 3 consecutive empty receives
+
+        // Keep receiving and completing messages until no more are available
+        // Strategy: Try receiving with a short timeout first to get existing messages
+        // If that times out, try one more time with a longer timeout to catch any in-flight messages
+        loop {
+            iteration += 1;
+            if iteration > max_iterations {
+                break;
+            }
+            
+            // Use a timeout to prevent hanging, but make it long enough to get existing messages
+            let receive_result = tokio::time::timeout(
+                Duration::from_secs(5),
+                receiver.receive_messages(batch_size)
+            ).await;
+            
+            let messages = match receive_result {
+                Ok(Ok(msgs)) => {
+                    if msgs.is_empty() {
+                        consecutive_empty_receives += 1;
+                    } else {
+                        consecutive_empty_receives = 0; // Reset on success
+                    }
+                    msgs
+                },
+                Ok(Err(e)) => {
+                    return Err(format!("Failed to receive messages: {}", e));
+                },
+                Err(_) => {
+                    // Timeout - no messages available
+                    consecutive_empty_receives += 1;
+                    
+                    if consecutive_empty_receives >= max_consecutive_empty {
+                        break;
+                    }
+                    continue;
+                }
+            };
+
+            if messages.is_empty() {
+                if consecutive_empty_receives >= max_consecutive_empty {
+                    break;
+                }
+                continue;
+            }
+
+            // In ReceiveAndDelete mode, messages are automatically deleted when received
+            // No need to complete them - just count them
+            purged_count += messages.len() as u32;
+        }
+
+        // Cleanup
+        receiver.dispose().await.map_err(|e| format!("Failed to dispose receiver: {}", e))?;
+        client.dispose().await.map_err(|e| format!("Failed to dispose client: {}", e))?;
+
+        Ok(purged_count)
     }
 
+    // Test connection by attempting to list queues (uses REST API)
     pub async fn test_connection(&self) -> Result<bool, String> {
         // Test by trying to list queues (limited to 1)
         match self.list_queues().await {

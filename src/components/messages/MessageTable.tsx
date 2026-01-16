@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { Eye, Send } from "lucide-react"
 import type { ServiceBusMessage } from "@/types/azure"
-import { cn } from "@/lib/utils"
+import { cn, formatDateSafe } from "@/lib/utils"
 
 interface MessageTableProps {
   messages: ServiceBusMessage[]
@@ -19,10 +19,16 @@ export function MessageTable({ messages, onMessageClick, onResend }: MessageTabl
     return JSON.stringify(body)
   }
 
-  const formatDate = (date: Date | undefined): string => {
+  const formatDate = (date: string | Date | undefined): string => {
     if (!date) return "-"
-    const d = new Date(date)
-    return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    // Try to parse and format
+    const d = date instanceof Date ? date : new Date(date)
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+    // If parsing fails, try formatDateSafe which returns the original string
+    const safe = formatDateSafe(date)
+    return safe || "-"
   }
 
   const getBodyPreview = (body: any, maxLines: number = 4): string => {

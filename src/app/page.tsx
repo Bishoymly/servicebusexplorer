@@ -23,7 +23,7 @@ export default function Home() {
   }, [selectedResource, connections])
 
   // Get queues for the selected connection to find queue properties with message counts
-  const { queues } = useQueues(selectedConnection)
+  const { queues, refreshQueue } = useQueues(selectedConnection)
   
   // Find the queue properties from the queues list
   const queueProperties = useMemo(() => {
@@ -44,9 +44,20 @@ export default function Home() {
     handleClose()
   }
 
-  const handleQueueUpdated = () => {
+  const handleQueueUpdated = async () => {
     if (selectedResource?.connectionId) {
-      refreshConnection(selectedResource.connectionId)
+      // Update tree (efficient - only updates the specific queue via updateQueueInTree)
+      // Note: refreshConnection would refresh everything, but updateQueueInTree is called in child
+      // So we don't need to call refreshConnection here - it's already handled
+      
+      // Also refresh the queue in the parent's useQueues hook so queueProperties prop updates
+      if (selectedResource?.type === "queue" && selectedResource.name && refreshQueue) {
+        try {
+          await refreshQueue(selectedResource.name)
+        } catch (err) {
+          console.warn("Failed to refresh queue in parent:", err)
+        }
+      }
     }
   }
 
@@ -54,6 +65,7 @@ export default function Home() {
     return (
       <div className="h-full">
         <QueueMessagesPanel 
+          key={`${selectedResource.connectionId}-${selectedResource.name}-${selectedResource.showDeadLetter ? 'dl' : 'active'}`}
           queueName={selectedResource.name}
           connection={selectedConnection}
           initialShowDeadLetter={selectedResource.showDeadLetter || false}

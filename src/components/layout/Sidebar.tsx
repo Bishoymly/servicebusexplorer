@@ -117,7 +117,7 @@ export function Sidebar() {
     setCreateSubscriptionDialog({ connectionId, topicName })
   }
 
-  const { treeNodes, refreshConnection } = useTreeData(
+  const { treeNodes, refreshConnection, updateQueueInTree } = useTreeData(
     handleConnectionRemoved,
     handleDeleteRequest,
     handleCreateQueue,
@@ -310,7 +310,7 @@ export function Sidebar() {
   }
 
   return (
-    <TreeRefreshProvider refreshConnection={refreshConnection}>
+    <TreeRefreshProvider refreshConnection={refreshConnection} updateQueueInTree={updateQueueInTree}>
       <div className="flex h-full w-96 flex-col border-r bg-card">
       <div className="border-b px-4 py-3">
         <div className="flex items-center gap-3">

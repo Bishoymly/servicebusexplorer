@@ -72,8 +72,8 @@ export interface ServiceBusMessage {
   to?: string
   applicationProperties?: Record<string, any>
   deliveryCount?: number
-  enqueuedTimeUtc?: Date
-  lockedUntilUtc?: Date
+  enqueuedTimeUtc?: string | Date
+  lockedUntilUtc?: string | Date
   sequenceNumber?: number
   deadLetterReason?: string
   deadLetterErrorDescription?: string

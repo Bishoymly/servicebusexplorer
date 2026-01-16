@@ -10,6 +10,7 @@ import { useConnections } from "@/hooks/useConnections"
 import type { ServiceBusConnection } from "@/types/azure"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { invoke } from "@tauri-apps/api/core"
 
 export function ConnectionManager() {
   const {
@@ -65,14 +66,24 @@ export function ConnectionManager() {
   const handleTest = async (connection: ServiceBusConnection) => {
     setTestingConnection(connection.id)
     try {
-      const response = await fetch("/api/connections/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ connection }),
-      })
-      const data = await response.json()
-      setConnectionStatus((prev) => ({ ...prev, [connection.id]: data.valid }))
+      // Load connection string from keychain if not present
+      let connWithString = connection
+      if (!connection.connectionString && connection.id) {
+        try {
+          // Try to get connection string directly from Tauri keychain command
+          const connStr = await invoke<string>("get_connection_string", { connectionId: connection.id })
+          if (connStr) {
+            connWithString = { ...connection, connectionString: connStr }
+          }
+        } catch (error) {
+          console.warn("Failed to load connection string from Keychain:", error)
+        }
+      }
+
+      const result = await invoke<boolean>("test_connection", { connection: connWithString })
+      setConnectionStatus((prev) => ({ ...prev, [connection.id]: result }))
     } catch (error) {
+      console.error("Connection test failed:", error)
       setConnectionStatus((prev) => ({ ...prev, [connection.id]: false }))
     } finally {
       setTestingConnection(null)
