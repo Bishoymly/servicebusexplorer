@@ -126,7 +126,9 @@ class ApiClient {
       throw new Error("No connection available")
     }
     const tauriConnection = this.transformConnectionForTauri(connWithString)
-    await invoke("create_queue", { connection: tauriConnection, queueName, properties })
+    // Include name in properties object as Rust expects QueueProperties with name field
+    const propertiesWithName = properties ? { ...properties, name: queueName } : { name: queueName }
+    await invoke("create_queue", { connection: tauriConnection, queueName, properties: propertiesWithName })
   }
 
   async updateQueue(
@@ -146,7 +148,9 @@ class ApiClient {
       throw new Error("No connection available")
     }
     const tauriConnection = this.transformConnectionForTauri(connWithString)
-    await invoke("update_queue", { connection: tauriConnection, queueName, properties })
+    // Include name in properties object as Rust expects QueueProperties with name field
+    const propertiesWithName = { ...properties, name: queueName }
+    await invoke("update_queue", { connection: tauriConnection, queueName, properties: propertiesWithName })
   }
 
   async deleteQueue(connection: ServiceBusConnection | null, queueName: string): Promise<void> {
@@ -454,9 +458,9 @@ class ApiClient {
       const tauriConnection = this.transformConnectionForTauri(tempConnection)
       console.log("Testing connection:", { 
         name: tauriConnection.name, 
-        hasConnectionString: !!tauriConnection.connection_string,
+        hasConnectionString: !!tauriConnection.connectionString,
         hasNamespace: !!tauriConnection.namespace,
-        useAzureAD: tauriConnection.use_azure_ad 
+        useAzureAD: tauriConnection.useAzureAD 
       })
       const result = await invoke<boolean>("test_connection", { connection: tauriConnection })
       console.log("Test result:", result)

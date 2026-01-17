@@ -308,7 +308,9 @@ export function useTreeData(
           loadQueuesPage(),
         ])
       })
-      .then(([topics, { queues }]) => {
+      .then((results) => {
+        const [topics, queuesResult] = results as [TopicProperties[], { queues: QueueProperties[] }]
+        const queues = queuesResult.queues
         const subscriptions: Record<string, SubscriptionProperties[]> = {}
         return Promise.all(
           topics.map(async (topic) => {

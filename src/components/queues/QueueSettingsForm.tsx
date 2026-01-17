@@ -102,11 +102,18 @@ export function QueueSettingsForm({
         requiresDuplicateDetection,
       }
 
+      let success = false
       if (queue) {
-        await updateQueue(queue.name, properties)
+        success = await updateQueue(queue.name, properties)
       } else {
-        await createQueue(name, properties)
+        success = await createQueue(name, properties)
       }
+      
+      if (!success) {
+        console.error("Failed to save queue: Operation returned false")
+        return
+      }
+      
       onSuccess()
       onOpenChange(false)
     } catch (error) {

@@ -281,7 +281,17 @@ impl ServiceBusClient {
         }
 
         let xml = response.text().await.map_err(|e| format!("Failed to read response: {}", e))?;
-        let entry: QueueEntry = from_str(&xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
+        let mut entry: QueueEntry = from_str(&xml).map_err(|e| format!("Failed to parse XML: {}", e))?;
+        
+        // Extract content XML using regex (same approach as list_queues)
+        let content_regex = regex::Regex::new(r#"(?s)<entry[^>]*>.*?<title[^>]*>([^<]+)</title>.*?<content[^>]*type="application/xml"[^>]*>(.*?)</content>"#).ok();
+        if let Some(ref re) = content_regex {
+            if let Some(cap) = re.captures(&xml) {
+                if let Some(content_match) = cap.get(2) {
+                    entry.content = Some(content_match.as_str().to_string());
+                }
+            }
+        }
 
         self.queue_entry_to_properties(&entry)
     }
@@ -290,7 +300,7 @@ impl ServiceBusClient {
         let url = format!("{}/{}?api-version={}", self.get_base_url(), queue_name, API_VERSION);
         let auth_header = self.get_auth_header(&url).await?;
 
-        let xml = self.queue_properties_to_xml(queue_name, properties)?;
+        let xml = self.queue_properties_to_xml(queue_name, properties, false)?;
 
         let response = self
             .client
@@ -337,7 +347,30 @@ impl ServiceBusClient {
             size_in_bytes: existing.size_in_bytes,
         };
 
-        self.create_queue(queue_name, Some(&merged)).await
+        // For updates, we need to use create_queue but mark it as an update to exclude immutable properties
+        let url = format!("{}/{}?api-version={}", self.get_base_url(), queue_name, API_VERSION);
+        let auth_header = self.get_auth_header(&url).await?;
+
+        // Generate XML for update (excluding immutable properties)
+        let xml = self.queue_properties_to_xml(queue_name, Some(&merged), true)?;
+
+        let response = self
+            .client
+            .put(&url)
+            .header("Authorization", &auth_header)
+            .header("Content-Type", "application/atom+xml;type=entry;charset=utf-8")
+            .body(xml)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to update queue: {}", e))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(format!("Failed to update queue: {} - {}", status, error_text));
+        }
+
+        Ok(())
     }
 
     pub async fn delete_queue(&self, queue_name: &str) -> Result<(), String> {
@@ -1526,6 +1559,17 @@ impl ServiceBusClient {
 
     // Helper methods for XML parsing and generation
     fn queue_entry_to_properties(&self, entry: &QueueEntry) -> Result<QueueProperties, String> {
+        // Helper function to parse ISO 8601 duration to seconds
+        fn duration_to_seconds(duration_str: &str) -> Option<u64> {
+            // Parse PT30S, PT1M, PT1H30M, etc.
+            let re = regex::Regex::new(r#"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?"#).ok()?;
+            let cap = re.captures(duration_str)?;
+            let hours: u64 = cap.get(1).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            let minutes: u64 = cap.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            let seconds: u64 = cap.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            Some(hours * 3600 + minutes * 60 + seconds)
+        }
+        
         // Parse message counts from content XML
         let mut message_count: Option<u64> = None;
         let mut active_message_count: Option<u64> = None;
@@ -1534,9 +1578,21 @@ impl ServiceBusClient {
         let mut transfer_message_count: Option<u64> = None;
         let mut transfer_dead_letter_message_count: Option<u64> = None;
         
+        // Parse queue properties from content XML
+        let mut max_size_in_megabytes: Option<u64> = None;
+        let mut lock_duration_in_seconds: Option<u64> = None;
+        let mut max_delivery_count: Option<u32> = None;
+        let mut default_message_time_to_live_in_seconds: Option<u64> = None;
+        let mut dead_lettering_on_message_expiration: Option<bool> = None;
+        let mut duplicate_detection_history_time_window_in_seconds: Option<u64> = None;
+        let mut enable_batched_operations: Option<bool> = None;
+        let mut enable_partitioning: Option<bool> = None;
+        let mut requires_session: Option<bool> = None;
+        let mut requires_duplicate_detection: Option<bool> = None;
+        let mut size_in_bytes: Option<u64> = None;
+        
         if let Some(ref content) = entry.content {
             // Extract counts from CountDetails using regex
-            // Format: <d2p1:ActiveMessageCount>0</d2p1:ActiveMessageCount>
             if let Some(cap) = regex::Regex::new(r#"<d2p1:ActiveMessageCount>(\d+)</d2p1:ActiveMessageCount>"#)
                 .ok()
                 .and_then(|re| re.captures(content))
@@ -1567,41 +1623,175 @@ impl ServiceBusClient {
             {
                 transfer_dead_letter_message_count = cap[1].parse().ok();
             }
-            // Also check for MessageCount (total)
             if let Some(cap) = regex::Regex::new(r#"<MessageCount>(\d+)</MessageCount>"#)
                 .ok()
                 .and_then(|re| re.captures(content))
             {
                 message_count = cap[1].parse().ok();
             }
+            
+            // Parse queue properties
+            if let Some(cap) = regex::Regex::new(r#"<MaxSizeInMegabytes>(\d+)</MaxSizeInMegabytes>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                max_size_in_megabytes = cap[1].parse().ok();
+            }
+            if let Some(cap) = regex::Regex::new(r#"<LockDuration>(.*?)</LockDuration>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                lock_duration_in_seconds = duration_to_seconds(&cap[1]);
+            }
+            if let Some(cap) = regex::Regex::new(r#"<MaxDeliveryCount>(\d+)</MaxDeliveryCount>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                max_delivery_count = cap[1].parse().ok();
+            }
+            if let Some(cap) = regex::Regex::new(r#"<DefaultMessageTimeToLive>(.*?)</DefaultMessageTimeToLive>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                default_message_time_to_live_in_seconds = duration_to_seconds(&cap[1]);
+            }
+            if let Some(cap) = regex::Regex::new(r#"<EnableDeadLetteringOnMessageExpiration>(true|false)</EnableDeadLetteringOnMessageExpiration>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                dead_lettering_on_message_expiration = Some(cap.get(1).map(|m| m.as_str() == "true").unwrap_or(false));
+            }
+            if let Some(cap) = regex::Regex::new(r#"<DuplicateDetectionHistoryTimeWindow>(.*?)</DuplicateDetectionHistoryTimeWindow>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                duplicate_detection_history_time_window_in_seconds = cap.get(1).and_then(|m| duration_to_seconds(m.as_str()));
+            }
+            if let Some(cap) = regex::Regex::new(r#"<EnableBatchedOperations>(true|false)</EnableBatchedOperations>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                enable_batched_operations = Some(cap.get(1).map(|m| m.as_str() == "true").unwrap_or(false));
+            }
+            if let Some(cap) = regex::Regex::new(r#"<EnablePartitioning>(true|false)</EnablePartitioning>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                enable_partitioning = Some(cap.get(1).map(|m| m.as_str() == "true").unwrap_or(false));
+            }
+            if let Some(cap) = regex::Regex::new(r#"<RequiresSession>(true|false)</RequiresSession>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                requires_session = Some(cap.get(1).map(|m| m.as_str() == "true").unwrap_or(false));
+            }
+            if let Some(cap) = regex::Regex::new(r#"<RequiresDuplicateDetection>(true|false)</RequiresDuplicateDetection>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                requires_duplicate_detection = Some(cap.get(1).map(|m| m.as_str() == "true").unwrap_or(false));
+            }
+            if let Some(cap) = regex::Regex::new(r#"<SizeInBytes>(\d+)</SizeInBytes>"#)
+                .ok()
+                .and_then(|re| re.captures(content))
+            {
+                size_in_bytes = cap[1].parse().ok();
+            }
         }
         
         Ok(QueueProperties {
             name: entry.title.clone(),
-            max_size_in_megabytes: None,
-            lock_duration_in_seconds: None,
-            max_delivery_count: None,
-            default_message_time_to_live_in_seconds: None,
-            dead_lettering_on_message_expiration: None,
-            duplicate_detection_history_time_window_in_seconds: None,
-            enable_batched_operations: None,
-            enable_partitioning: None,
-            requires_session: None,
-            requires_duplicate_detection: None,
+            max_size_in_megabytes,
+            lock_duration_in_seconds,
+            max_delivery_count,
+            default_message_time_to_live_in_seconds,
+            dead_lettering_on_message_expiration,
+            duplicate_detection_history_time_window_in_seconds,
+            enable_batched_operations,
+            enable_partitioning,
+            requires_session,
+            requires_duplicate_detection,
             message_count,
             active_message_count,
             dead_letter_message_count,
             scheduled_message_count,
             transfer_message_count,
             transfer_dead_letter_message_count,
-            size_in_bytes: None,
+            size_in_bytes,
         })
     }
 
-    fn queue_properties_to_xml(&self, queue_name: &str, _properties: Option<&QueueProperties>) -> Result<String, String> {
-        // Generate XML for queue creation/update
-        // This is a simplified version - full implementation would generate proper XML
-        Ok(format!(r#"<?xml version="1.0" encoding="utf-8"?><entry xmlns="http://www.w3.org/2005/Atom"><title>{}</title></entry>"#, queue_name))
+    fn queue_properties_to_xml(&self, queue_name: &str, properties: Option<&QueueProperties>, is_update: bool) -> Result<String, String> {
+        // Helper function to convert seconds to ISO 8601 duration (PT30S format)
+        fn seconds_to_duration(seconds: u64) -> String {
+            if seconds < 60 {
+                format!("PT{}S", seconds)
+            } else if seconds < 3600 {
+                let minutes = seconds / 60;
+                let secs = seconds % 60;
+                if secs == 0 {
+                    format!("PT{}M", minutes)
+                } else {
+                    format!("PT{}M{}S", minutes, secs)
+                }
+            } else {
+                let hours = seconds / 3600;
+                let remainder = seconds % 3600;
+                let minutes = remainder / 60;
+                let secs = remainder % 60;
+                if minutes == 0 && secs == 0 {
+                    format!("PT{}H", hours)
+                } else if secs == 0 {
+                    format!("PT{}H{}M", hours, minutes)
+                } else {
+                    format!("PT{}H{}M{}S", hours, minutes, secs)
+                }
+            }
+        }
+        
+        let mut xml = String::from(r#"<?xml version="1.0" encoding="utf-8"?><entry xmlns="http://www.w3.org/2005/Atom"><title>"#);
+        xml.push_str(queue_name);
+        xml.push_str(r#"</title><content type="application/xml"><QueueDescription xmlns="http://schemas.microsoft.com/netservices/2010/10/servicebus/connect">"#);
+        
+        if let Some(props) = properties {
+            if let Some(max_size) = props.max_size_in_megabytes {
+                xml.push_str(&format!("<MaxSizeInMegabytes>{}</MaxSizeInMegabytes>", max_size));
+            }
+            if let Some(lock_duration) = props.lock_duration_in_seconds {
+                xml.push_str(&format!("<LockDuration>{}</LockDuration>", seconds_to_duration(lock_duration)));
+            }
+            if let Some(max_delivery) = props.max_delivery_count {
+                xml.push_str(&format!("<MaxDeliveryCount>{}</MaxDeliveryCount>", max_delivery));
+            }
+            if let Some(ttl) = props.default_message_time_to_live_in_seconds {
+                xml.push_str(&format!("<DefaultMessageTimeToLive>{}</DefaultMessageTimeToLive>", seconds_to_duration(ttl)));
+            }
+            if let Some(dead_letter) = props.dead_lettering_on_message_expiration {
+                xml.push_str(&format!("<EnableDeadLetteringOnMessageExpiration>{}</EnableDeadLetteringOnMessageExpiration>", dead_letter));
+            }
+            if let Some(dup_window) = props.duplicate_detection_history_time_window_in_seconds {
+                xml.push_str(&format!("<DuplicateDetectionHistoryTimeWindow>{}</DuplicateDetectionHistoryTimeWindow>", seconds_to_duration(dup_window)));
+            }
+            if let Some(batched) = props.enable_batched_operations {
+                xml.push_str(&format!("<EnableBatchedOperations>{}</EnableBatchedOperations>", batched));
+            }
+            // Immutable properties - only include when creating, not when updating
+            if !is_update {
+                if let Some(partitioning) = props.enable_partitioning {
+                    xml.push_str(&format!("<EnablePartitioning>{}</EnablePartitioning>", partitioning));
+                }
+                if let Some(session) = props.requires_session {
+                    xml.push_str(&format!("<RequiresSession>{}</RequiresSession>", session));
+                }
+                if let Some(dup_detection) = props.requires_duplicate_detection {
+                    xml.push_str(&format!("<RequiresDuplicateDetection>{}</RequiresDuplicateDetection>", dup_detection));
+                }
+            }
+        }
+        
+        xml.push_str(r#"</QueueDescription></content></entry>"#);
+        
+        Ok(xml)
     }
 
     fn topic_entry_to_properties(&self, entry: &TopicEntry) -> Result<TopicProperties, String> {

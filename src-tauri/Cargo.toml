@@ -45,6 +45,11 @@ path = "src/main.rs"
 name = "test-peek"
 path = "src/bin/test-peek.rs"
 
+# Test binary for debugging queue creation
+[[bin]]
+name = "test-create-queue"
+path = "src/bin/test-create-queue.rs"
+
 [profile.release]
 # Include debug symbols for Xcode dSYM generation
 debug = true
