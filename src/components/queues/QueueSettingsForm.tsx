@@ -15,14 +15,15 @@ import {
 import { useQueues } from "@/hooks/useQueues"
 import type { QueueProperties, ServiceBusConnection } from "@/types/azure"
 import { Trash2 } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface QueueSettingsFormProps {
   queue?: QueueProperties
   connection?: ServiceBusConnection
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSuccess: () => void
-  onDelete?: () => void
+  onSuccess: (queueName?: string) => void
+  onDelete?: (queueName: string) => void
 }
 
 export function QueueSettingsForm({
@@ -33,7 +34,7 @@ export function QueueSettingsForm({
   onSuccess,
   onDelete,
 }: QueueSettingsFormProps) {
-  const { createQueue, updateQueue, deleteQueue } = useQueues(connection)
+  const { createQueue, updateQueue, deleteQueue, error: queueError, refresh } = useQueues(connection)
   const [name, setName] = useState("")
   const [maxSizeInMegabytes, setMaxSizeInMegabytes] = useState<number | undefined>()
   const [lockDurationInSeconds, setLockDurationInSeconds] = useState<number | undefined>()
@@ -53,35 +54,42 @@ export function QueueSettingsForm({
   const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
-    if (queue) {
-      setName(queue.name)
-      setMaxSizeInMegabytes(queue.maxSizeInMegabytes)
-      setLockDurationInSeconds(queue.lockDurationInSeconds)
-      setMaxDeliveryCount(queue.maxDeliveryCount)
-      setDefaultMessageTimeToLiveInSeconds(queue.defaultMessageTimeToLiveInSeconds)
-      setDeadLetteringOnMessageExpiration(queue.deadLetteringOnMessageExpiration || false)
-      setDuplicateDetectionHistoryTimeWindowInSeconds(
-        queue.duplicateDetectionHistoryTimeWindowInSeconds
-      )
-      setEnableBatchedOperations(queue.enableBatchedOperations ?? true)
-      setEnablePartitioning(queue.enablePartitioning || false)
-      setRequiresSession(queue.requiresSession || false)
-      setRequiresDuplicateDetection(queue.requiresDuplicateDetection || false)
-    } else {
-      // Reset form for new queue
-      setName("")
-      setMaxSizeInMegabytes(undefined)
-      setLockDurationInSeconds(undefined)
-      setMaxDeliveryCount(undefined)
-      setDefaultMessageTimeToLiveInSeconds(undefined)
-      setDeadLetteringOnMessageExpiration(false)
-      setDuplicateDetectionHistoryTimeWindowInSeconds(undefined)
-      setEnableBatchedOperations(true)
-      setEnablePartitioning(false)
-      setRequiresSession(false)
-      setRequiresDuplicateDetection(false)
+    if (open) {
+      // Clear any previous errors when dialog opens
+      if (queueError) {
+        // Error will be cleared by the hook when operations succeed
+      }
+      
+      if (queue) {
+        setName(queue.name)
+        setMaxSizeInMegabytes(queue.maxSizeInMegabytes)
+        setLockDurationInSeconds(queue.lockDurationInSeconds)
+        setMaxDeliveryCount(queue.maxDeliveryCount)
+        setDefaultMessageTimeToLiveInSeconds(queue.defaultMessageTimeToLiveInSeconds)
+        setDeadLetteringOnMessageExpiration(queue.deadLetteringOnMessageExpiration || false)
+        setDuplicateDetectionHistoryTimeWindowInSeconds(
+          queue.duplicateDetectionHistoryTimeWindowInSeconds
+        )
+        setEnableBatchedOperations(queue.enableBatchedOperations ?? true)
+        setEnablePartitioning(queue.enablePartitioning || false)
+        setRequiresSession(queue.requiresSession || false)
+        setRequiresDuplicateDetection(queue.requiresDuplicateDetection || false)
+      } else {
+        // Reset form for new queue
+        setName("")
+        setMaxSizeInMegabytes(undefined)
+        setLockDurationInSeconds(undefined)
+        setMaxDeliveryCount(undefined)
+        setDefaultMessageTimeToLiveInSeconds(undefined)
+        setDeadLetteringOnMessageExpiration(false)
+        setDuplicateDetectionHistoryTimeWindowInSeconds(undefined)
+        setEnableBatchedOperations(true)
+        setEnablePartitioning(false)
+        setRequiresSession(false)
+        setRequiresDuplicateDetection(false)
+      }
     }
-  }, [queue, open])
+  }, [queue, open, queueError])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -103,18 +111,26 @@ export function QueueSettingsForm({
       }
 
       let success = false
-      if (queue) {
-        success = await updateQueue(queue.name, properties)
-      } else {
-        success = await createQueue(name, properties)
-      }
-      
-      if (!success) {
-        console.error("Failed to save queue: Operation returned false")
+      try {
+        if (queue) {
+          success = await updateQueue(queue.name, properties)
+        } else {
+          success = await createQueue(name, properties)
+        }
+        
+        if (!success) {
+          // Error is already set in the hook via setError, it will be displayed in the form
+          // Log the error for debugging
+          console.error("Queue operation failed:", queueError || "Unknown error")
+          return
+        }
+      } catch (err) {
+        console.error("Queue operation exception:", err)
         return
       }
       
-      onSuccess()
+      // Pass queue name to onSuccess callback so parent can update tree efficiently
+      onSuccess(queue ? queue.name : name)
       onOpenChange(false)
     } catch (error) {
       console.error("Failed to save queue:", error)
@@ -128,15 +144,17 @@ export function QueueSettingsForm({
 
     setDeleting(true)
     try {
-      await deleteQueue(queue.name)
-      setDeleteDialogOpen(false)
-      onOpenChange(false)
-      // Call onDelete callback first (to refresh tree and close panel)
-      if (onDelete) {
-        onDelete()
+      const success = await deleteQueue(queue.name)
+      if (success) {
+        setDeleteDialogOpen(false)
+        onOpenChange(false)
+        // Call onDelete callback with queue name (to remove from tree) only if deletion was successful
+        if (onDelete) {
+          onDelete(queue.name)
+        }
+        // Then call onSuccess for any other cleanup
+        onSuccess(queue.name)
       }
-      // Then call onSuccess for any other cleanup
-      onSuccess()
     } catch (error) {
       console.error("Failed to delete queue:", error)
     } finally {
@@ -152,6 +170,11 @@ export function QueueSettingsForm({
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="space-y-4 py-4">
+            {queueError && (
+              <Alert variant="destructive">
+                <AlertDescription>{queueError}</AlertDescription>
+              </Alert>
+            )}
             <div className="space-y-2">
               <Label htmlFor="name">Queue Name</Label>
               <Input

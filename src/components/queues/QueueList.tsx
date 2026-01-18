@@ -14,10 +14,12 @@ import { useConnections } from "@/hooks/useConnections"
 import type { QueueProperties, QueueSortOption } from "@/types/azure"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useEffect } from "react"
+import { useTreeRefresh } from "@/contexts/TreeRefreshContext"
 
 export function QueueList() {
   const { queues, loading, error, sortBy, setSortBy, refresh, refreshQueue, deleteQueue, purgeQueue } = useQueues()
   const { currentConnection, currentConnectionId } = useConnections()
+  const { removeQueueFromTree } = useTreeRefresh()
   const [selectedQueue, setSelectedQueue] = useState<QueueProperties | null>(null)
   const [selectedQueueForMessages, setSelectedQueueForMessages] = useState<string | null>(null)
   const [showDeadLetterForQueue, setShowDeadLetterForQueue] = useState<string | null>(null)
@@ -74,10 +76,18 @@ export function QueueList() {
 
   const handleDelete = async (queueName: string) => {
     if (confirm(`Are you sure you want to delete queue "${queueName}"?`)) {
-      await deleteQueue(queueName)
-      if (selectedQueue?.name === queueName) {
-        setSelectedQueue(null)
-        setShowDetails(false)
+      const success = await deleteQueue(queueName)
+      if (success) {
+        // Remove queue from tree if deletion was successful
+        if (currentConnectionId && removeQueueFromTree) {
+          removeQueueFromTree(currentConnectionId, queueName)
+        }
+        // Clear selection if the deleted queue was selected
+        if (selectedQueue?.name === queueName) {
+          setSelectedQueue(null)
+          setShowDetails(false)
+          setSelectedQueueForMessages(null)
+        }
       }
     }
   }
@@ -260,9 +270,9 @@ export function QueueList() {
               connection={currentConnection}
               initialShowDeadLetter={showDeadLetterForQueue === selectedQueueForMessages}
               initialQueueProperties={currentQueue || undefined}
-              onQueueUpdated={() => {
-                // Refresh the queues list to get updated counts
-                refresh()
+              onQueueUpdated={async () => {
+                // Queue is already refreshed in useQueues hook via refreshQueue
+                // No need to refresh the entire list
               }}
               onClose={() => {
                 setSelectedQueueForMessages(null)
@@ -290,7 +300,10 @@ export function QueueList() {
             queue={selectedQueue}
             open={showSettings}
             onOpenChange={setShowSettings}
-            onSuccess={refresh}
+            onSuccess={async (queueName?: string) => {
+              // Queue is already refreshed in useQueues hook, just close dialog
+              setShowSettings(false)
+            }}
           />
         </>
       )}
@@ -299,9 +312,9 @@ export function QueueList() {
         <QueueSettingsForm
           open={showCreateForm}
           onOpenChange={setShowCreateForm}
-          onSuccess={() => {
+          onSuccess={async (queueName?: string) => {
+            // Queue is already refreshed in useQueues hook, just close dialog
             setShowCreateForm(false)
-            refresh()
           }}
         />
       )}

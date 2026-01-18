@@ -325,9 +325,11 @@ impl ServiceBusClient {
         // Get existing queue first
         let existing = self.get_queue(queue_name).await?;
         
-        // Merge properties
+        // Merge properties: use new value if provided, otherwise use existing value
+        // For updates, we must include ALL updatable properties, using existing values for ones not being changed
         let merged = QueueProperties {
             name: properties.name.clone(),
+            // Use new value if provided, otherwise keep existing value
             max_size_in_megabytes: properties.max_size_in_megabytes.or(existing.max_size_in_megabytes),
             lock_duration_in_seconds: properties.lock_duration_in_seconds.or(existing.lock_duration_in_seconds),
             max_delivery_count: properties.max_delivery_count.or(existing.max_delivery_count),
@@ -335,9 +337,10 @@ impl ServiceBusClient {
             dead_lettering_on_message_expiration: properties.dead_lettering_on_message_expiration.or(existing.dead_lettering_on_message_expiration),
             duplicate_detection_history_time_window_in_seconds: properties.duplicate_detection_history_time_window_in_seconds.or(existing.duplicate_detection_history_time_window_in_seconds),
             enable_batched_operations: properties.enable_batched_operations.or(existing.enable_batched_operations),
-            enable_partitioning: properties.enable_partitioning.or(existing.enable_partitioning),
-            requires_session: properties.requires_session.or(existing.requires_session),
-            requires_duplicate_detection: properties.requires_duplicate_detection.or(existing.requires_duplicate_detection),
+            // Immutable properties - always use existing values (cannot be changed)
+            enable_partitioning: existing.enable_partitioning, // Always use existing - immutable
+            requires_session: existing.requires_session, // Always use existing - immutable
+            requires_duplicate_detection: existing.requires_duplicate_detection, // Always use existing - immutable
             message_count: existing.message_count,
             active_message_count: existing.active_message_count,
             dead_letter_message_count: existing.dead_letter_message_count,
@@ -353,6 +356,13 @@ impl ServiceBusClient {
 
         // Generate XML for update (excluding immutable properties)
         let xml = self.queue_properties_to_xml(queue_name, Some(&merged), true)?;
+        
+        // Log the XML for debugging (remove in production)
+        eprintln!("[update_queue] XML being sent:\n{}", xml);
+        eprintln!("[update_queue] Merged properties - max_size: {:?}, lock_duration: {:?}, max_delivery: {:?}, ttl: {:?}, dead_letter: {:?}, dup_window: {:?}, batched: {:?}", 
+            merged.max_size_in_megabytes, merged.lock_duration_in_seconds, merged.max_delivery_count,
+            merged.default_message_time_to_live_in_seconds, merged.dead_lettering_on_message_expiration,
+            merged.duplicate_detection_history_time_window_in_seconds, merged.enable_batched_operations);
 
         let response = self
             .client

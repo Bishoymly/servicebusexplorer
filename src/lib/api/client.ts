@@ -15,9 +15,17 @@ import {
 } from "@/lib/demo/mockData"
 
 class ApiClient {
-  private isDemoMode(): boolean {
+  private isDemoMode(connection?: ServiceBusConnection | null): boolean {
     if (typeof window === "undefined") return false
-    return localStorage.getItem("demoMode") === "true"
+    // Check if demo mode is enabled AND if we're using the demo connection
+    const demoModeEnabled = localStorage.getItem("demoMode") === "true"
+    if (!demoModeEnabled) return false
+    // If a connection is provided, only return demo mode if it's the demo connection
+    if (connection) {
+      return connection.id === MOCK_CONNECTION.id
+    }
+    // If no connection provided, check localStorage (for backward compatibility)
+    return demoModeEnabled
   }
   
   // No longer needed - Rust struct now accepts camelCase directly via serde rename_all
@@ -45,7 +53,7 @@ class ApiClient {
   }
 
   async listQueues(connection: ServiceBusConnection | null): Promise<QueueProperties[]> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       // Simulate async delay
       await new Promise(resolve => setTimeout(resolve, 300))
       return [...MOCK_QUEUES]
@@ -66,7 +74,7 @@ class ApiClient {
     skip?: number,
     top?: number
   ): Promise<QueueProperties[]> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       // Simulate async delay
       await new Promise(resolve => setTimeout(resolve, 100))
       const start = skip || 0
@@ -89,7 +97,7 @@ class ApiClient {
   }
 
   async getQueue(connection: ServiceBusConnection | null, queueName: string): Promise<QueueProperties> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 200))
       const queue = MOCK_QUEUES.find(q => q.name === queueName)
       if (!queue) {
@@ -113,7 +121,7 @@ class ApiClient {
     queueName: string,
     properties?: Partial<QueueProperties>
   ): Promise<void> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 500))
       // In demo mode, just simulate success
       return
@@ -136,7 +144,7 @@ class ApiClient {
     queueName: string,
     properties: Partial<QueueProperties>
   ): Promise<void> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 400))
       return
     }
@@ -154,7 +162,7 @@ class ApiClient {
   }
 
   async deleteQueue(connection: ServiceBusConnection | null, queueName: string): Promise<void> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 300))
       return
     }
@@ -186,7 +194,7 @@ class ApiClient {
   }
 
   async getTopic(connection: ServiceBusConnection | null, topicName: string): Promise<TopicProperties> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 200))
       const topic = MOCK_TOPICS.find(t => t.name === topicName)
       if (!topic) {
@@ -210,7 +218,7 @@ class ApiClient {
     topicName: string,
     properties?: Partial<TopicProperties>
   ): Promise<void> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 500))
       return
     }
@@ -230,7 +238,7 @@ class ApiClient {
     topicName: string,
     properties: Partial<TopicProperties>
   ): Promise<void> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 400))
       return
     }
@@ -246,7 +254,7 @@ class ApiClient {
   }
 
   async deleteTopic(connection: ServiceBusConnection | null, topicName: string): Promise<void> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 300))
       return
     }
@@ -265,7 +273,7 @@ class ApiClient {
     connection: ServiceBusConnection | null,
     topicName: string
   ): Promise<SubscriptionProperties[]> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 200))
       return [...(MOCK_SUBSCRIPTIONS[topicName] || [])]
     }
@@ -286,7 +294,7 @@ class ApiClient {
     subscriptionName: string,
     properties?: Partial<SubscriptionProperties>
   ): Promise<void> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 500))
       return
     }
@@ -308,7 +316,7 @@ class ApiClient {
     subscriptionName?: string,
     maxCount: number = 10
   ): Promise<ServiceBusMessage[]> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 400))
       return generateMockMessages(queueName, topicName, subscriptionName, false, maxCount)
     }
@@ -336,7 +344,7 @@ class ApiClient {
     subscriptionName?: string,
     maxCount: number = 10
   ): Promise<ServiceBusMessage[]> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 400))
       return generateMockMessages(queueName, topicName, subscriptionName, true, maxCount)
     }
@@ -362,7 +370,7 @@ class ApiClient {
     queueName: string,
     message: ServiceBusMessage
   ): Promise<void> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 500))
       // In demo mode, just simulate success
       return
@@ -383,7 +391,7 @@ class ApiClient {
     topicName: string,
     message: ServiceBusMessage
   ): Promise<void> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 500))
       return
     }
@@ -403,7 +411,7 @@ class ApiClient {
     queueName: string,
     purgeDeadLetter: boolean = false
   ): Promise<number> {
-    if (this.isDemoMode()) {
+    if (this.isDemoMode(connection)) {
       await new Promise(resolve => setTimeout(resolve, 600))
       // Return a mock purged count
       const queue = MOCK_QUEUES.find(q => q.name === queueName)
@@ -424,7 +432,9 @@ class ApiClient {
   }
 
   async testConnection(connection: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt">): Promise<boolean> {
-    if (this.isDemoMode()) {
+    // For testConnection, we can't check the connection ID since it's a partial connection
+    // So we just check localStorage
+    if (typeof window !== "undefined" && localStorage.getItem("demoMode") === "true") {
       // In demo mode, simulate a successful test
       await new Promise(resolve => setTimeout(resolve, 500))
       return true

@@ -123,11 +123,12 @@ export function MessageEditor({
 
     let parsedBody: any = body
     if (bodyFormat === "json") {
+      // Try to parse JSON, but if it fails, send as string
       try {
-        parsedBody = JSON.parse(body)
+        parsedBody = body.trim() === "" ? "" : JSON.parse(body)
       } catch (error) {
-        alert("Invalid JSON in body")
-        return
+        // If JSON parsing fails, send the body as a string
+        parsedBody = body
       }
     }
 
@@ -160,7 +161,13 @@ export function MessageEditor({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent 
+        className="max-w-3xl max-h-[90vh] overflow-y-auto"
+        onClick={(e) => {
+          // Prevent clicks inside dialog from closing it
+          e.stopPropagation()
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{initialMessage ? "Resend Message" : "Send Message"}</DialogTitle>
         </DialogHeader>
@@ -179,37 +186,15 @@ export function MessageEditor({
                   </Tabs>
                 </div>
               </div>
-              <div className="relative border rounded-md overflow-hidden">
-                <textarea
-                  id="body"
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  className="w-full min-h-[300px] bg-transparent px-3 py-2 text-sm font-mono relative z-10 resize-none border-0 focus:outline-none focus:ring-0"
-                  placeholder={bodyFormat === "json" ? '{\n  "key": "value"\n}' : "Enter message body"}
-                  required
-                  spellCheck={false}
-                />
-                <div
-                  className="absolute inset-0 pointer-events-none z-0 overflow-auto"
-                  style={{ padding: "0.5rem" }}
-                >
-                  <pre className="text-sm font-mono m-0" style={{ whiteSpace: "pre-wrap", wordWrap: "break-word" }}>
-                    <SyntaxHighlighter
-                      language={bodyFormat === "json" ? "json" : "text"}
-                      style={isDarkMode ? vscDarkPlus : coy}
-                      customStyle={{
-                        margin: 0,
-                        padding: 0,
-                        background: "transparent",
-                        fontSize: "0.875rem",
-                      }}
-                      PreTag="span"
-                    >
-                      {body || " "}
-                    </SyntaxHighlighter>
-                  </pre>
-                </div>
-              </div>
+              <textarea
+                id="body"
+                name="body"
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                className="w-full min-h-[300px] resize-none border rounded-md px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-ring"
+                placeholder={bodyFormat === "json" ? '{\n  "key": "value"\n}' : "Enter message body"}
+                spellCheck={false}
+              />
             </div>
 
             {/* Optional Fields - Collapsed */}
@@ -309,7 +294,10 @@ export function MessageEditor({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={loading || (!queueName && !topicName)}>
+            <Button 
+              type="submit" 
+              disabled={loading || (!queueName && !topicName)}
+            >
               {loading ? "Sending..." : initialMessage ? "Resend" : "Send"}
             </Button>
           </DialogFooter>

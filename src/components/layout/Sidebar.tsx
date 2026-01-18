@@ -28,49 +28,25 @@ export function Sidebar() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [connectionToDelete, setConnectionToDelete] = useState<{ id: string; name: string } | null>(null)
 
-  // Keyboard shortcut: Press D key 3 times quickly, or Ctrl/Cmd+D
+  // Keyboard shortcut: Ctrl/Cmd+D to toggle demo mode
   useEffect(() => {
-    let keyPressCount = 0
-    let keyPressTimer: NodeJS.Timeout | null = null
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+D or Cmd+D to toggle demo mode
-      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
-        e.preventDefault()
-        toggleDemoMode()
+      // Don't intercept keys when user is typing in an input field
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
         return
       }
 
-      // Press D key 3 times quickly
-      if (e.key === 'd' || e.key === 'D') {
+      // Ctrl+D or Cmd+D to toggle demo mode
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
         e.preventDefault()
-        keyPressCount++
-        
-        if (keyPressCount >= 3) {
-          toggleDemoMode()
-          keyPressCount = 0
-          if (keyPressTimer) {
-            clearTimeout(keyPressTimer)
-            keyPressTimer = null
-          }
-        } else {
-          // Reset counter after 1 second of inactivity
-          if (keyPressTimer) {
-            clearTimeout(keyPressTimer)
-          }
-          keyPressTimer = setTimeout(() => {
-            keyPressCount = 0
-          }, 1000)
-        }
+        toggleDemoMode()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
-      if (keyPressTimer) {
-        clearTimeout(keyPressTimer)
-      }
     }
   }, [toggleDemoMode])
   
@@ -117,7 +93,7 @@ export function Sidebar() {
     setCreateSubscriptionDialog({ connectionId, topicName })
   }
 
-  const { treeNodes, refreshConnection, updateQueueInTree } = useTreeData(
+  const { treeNodes, refreshConnection, updateQueueInTree, addQueueToTree, removeQueueFromTree } = useTreeData(
     handleConnectionRemoved,
     handleDeleteRequest,
     handleCreateQueue,
@@ -310,7 +286,11 @@ export function Sidebar() {
   }
 
   return (
-    <TreeRefreshProvider refreshConnection={refreshConnection} updateQueueInTree={updateQueueInTree}>
+    <TreeRefreshProvider 
+      refreshConnection={refreshConnection} 
+      updateQueueInTree={updateQueueInTree}
+      removeQueueFromTree={removeQueueFromTree}
+    >
       <div className="flex h-full w-96 flex-col border-r bg-card">
       <div className="border-b px-4 py-3">
         <div className="flex items-center gap-3">
@@ -434,9 +414,18 @@ export function Sidebar() {
             onOpenChange={(open) => {
               if (!open) setCreateQueueDialog(null)
             }}
-            onSuccess={async () => {
+            onSuccess={async (queueName?: string) => {
               setCreateQueueDialog(null)
-              await refreshConnection(createQueueDialog.connectionId)
+              // Add the newly created queue to tree without refreshing everything
+              if (queueName && createQueueDialog && addQueueToTree) {
+                await addQueueToTree(createQueueDialog.connectionId, queueName)
+              }
+            }}
+            onDelete={async (queueName: string) => {
+              // Remove queue from tree when deleted
+              if (createQueueDialog) {
+                removeQueueFromTree(createQueueDialog.connectionId, queueName)
+              }
             }}
           />
         )

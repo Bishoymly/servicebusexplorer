@@ -393,25 +393,25 @@ export function QueueMessagesPanel({ queueName, connection, initialShowDeadLette
     }
   }
 
-  const handleEditSuccess = async () => {
+  const handleEditSuccess = async (updatedQueueName?: string) => {
     // Reload queue properties after editing
     const queue = await getQueue(queueName)
     if (queue) {
       setQueueProperties(queue)
     }
     setShowEditDialog(false)
-    // Refresh tree view
+    // Tree will be updated via updateQueueInTree in the parent
     if (onQueueUpdated) {
       onQueueUpdated()
     }
   }
 
-  const handleQueueDeleted = () => {
+  const handleQueueDeleted = (deletedQueueName: string) => {
     // Close the panel when queue is deleted
     if (onClose) {
       onClose()
     }
-    // Refresh tree view
+    // Tree will be updated via removeQueueFromTree in the parent
     if (onQueueDeleted) {
       onQueueDeleted()
     }

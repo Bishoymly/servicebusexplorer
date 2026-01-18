@@ -11,7 +11,7 @@ import { useQueues } from "@/hooks/useQueues"
 export default function Home() {
   const { selectedResource, setSelectedResource } = useSelectedResource()
   const { connections } = useConnections()
-  const { refreshConnection } = useTreeRefresh()
+  const { updateQueueInTree, removeQueueFromTree, addQueueToTree } = useTreeRefresh()
   
   // Check if the selected resource's connection is still valid
   const isValidResource = selectedResource && connections.some(c => c.id === selectedResource.connectionId)
@@ -37,21 +37,34 @@ export default function Home() {
     setSelectedResource(null)
   }
 
-  const handleQueueDeleted = () => {
+  const handleQueueDeleted = (deletedQueueName: string) => {
+    // Check if the deleted queue is currently displayed
+    const isCurrentlyDisplayed = selectedResource?.type === "queue" && selectedResource.name === deletedQueueName
+    
     if (selectedResource?.connectionId) {
-      refreshConnection(selectedResource.connectionId)
+      // Remove queue from tree without refreshing everything
+      if (removeQueueFromTree) {
+        removeQueueFromTree(selectedResource.connectionId, deletedQueueName)
+      }
     }
-    handleClose()
+    
+    // If the deleted queue is currently shown, clear the selection (makes right side empty)
+    if (isCurrentlyDisplayed) {
+      setSelectedResource(null)
+    }
   }
 
   const handleQueueUpdated = async () => {
-    if (selectedResource?.connectionId) {
-      // Update tree (efficient - only updates the specific queue via updateQueueInTree)
-      // Note: refreshConnection would refresh everything, but updateQueueInTree is called in child
-      // So we don't need to call refreshConnection here - it's already handled
+    if (selectedResource?.connectionId && selectedResource?.type === "queue" && selectedResource.name) {
+      // Update tree (efficient - only updates the specific queue)
+      try {
+        await updateQueueInTree(selectedResource.connectionId, selectedResource.name)
+      } catch (err) {
+        console.warn("Failed to update queue in tree:", err)
+      }
       
       // Also refresh the queue in the parent's useQueues hook so queueProperties prop updates
-      if (selectedResource?.type === "queue" && selectedResource.name && refreshQueue) {
+      if (refreshQueue) {
         try {
           await refreshQueue(selectedResource.name)
         } catch (err) {

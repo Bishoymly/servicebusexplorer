@@ -47,7 +47,7 @@ export function Header() {
     }
   }
 
-  const handleFormSubmit = async (data: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt">) => {
+  const handleFormSubmit = (data: Omit<ServiceBusConnection, "id" | "createdAt" | "updatedAt">) => {
     const newConnection: ServiceBusConnection = {
       ...data,
       id: crypto.randomUUID(),

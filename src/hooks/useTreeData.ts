@@ -395,6 +395,75 @@ export function useTreeData(
     }
   }, [connections])
 
+  // Add a single queue to the tree data without refreshing everything
+  const addQueueToTree = useCallback(async (connectionId: string, queueName: string) => {
+    const connection = connections.find(c => c.id === connectionId)
+    if (!connection) return
+
+    try {
+      const newQueue = await apiClient.getQueue(connection, queueName)
+      setConnectionData(prev => {
+        const currentData = prev[connectionId]
+        if (!currentData) {
+          // If connection data doesn't exist, create it
+          return {
+            ...prev,
+            [connectionId]: {
+              queues: [newQueue],
+              topics: [],
+              subscriptions: {},
+            },
+          }
+        }
+
+        // Check if queue already exists
+        const queueExists = currentData.queues.some(q => q.name === queueName)
+        if (queueExists) {
+          // Update existing queue
+          const updatedQueues = currentData.queues.map(q => 
+            q.name === queueName ? newQueue : q
+          )
+          return {
+            ...prev,
+            [connectionId]: {
+              ...currentData,
+              queues: updatedQueues,
+            },
+          }
+        } else {
+          // Add new queue
+          return {
+            ...prev,
+            [connectionId]: {
+              ...currentData,
+              queues: [...currentData.queues, newQueue],
+            },
+          }
+        }
+      })
+    } catch (err) {
+      console.error(`Failed to add queue ${queueName} to tree:`, err)
+    }
+  }, [connections])
+
+  // Remove a single queue from the tree data without refreshing everything
+  const removeQueueFromTree = useCallback((connectionId: string, queueName: string) => {
+    setConnectionData(prev => {
+      const currentData = prev[connectionId]
+      if (!currentData) return prev
+
+      const filteredQueues = currentData.queues.filter(q => q.name !== queueName)
+      
+      return {
+        ...prev,
+        [connectionId]: {
+          ...currentData,
+          queues: filteredQueues,
+        },
+      }
+    })
+  }, [])
+
   const treeNodes = React.useMemo(() => {
     return connections.map(connection => {
       const data = connectionData[connection.id] || { queues: [], topics: [], subscriptions: {} }
@@ -784,6 +853,8 @@ export function useTreeData(
     loading,
     refreshConnection,
     updateQueueInTree,
+    addQueueToTree,
+    removeQueueFromTree,
   }
 }
 

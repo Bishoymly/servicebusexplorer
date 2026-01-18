@@ -148,51 +148,6 @@ export function useQueues(connectionOverride?: ServiceBusConnection | null) {
     [connection]
   )
 
-  const updateQueue = useCallback(
-    async (queueName: string, properties: Partial<QueueProperties>): Promise<boolean> => {
-      if (!connection) return false
-      try {
-        await apiClient.updateQueue(connection, queueName, properties)
-        await loadQueues()
-        return true
-      } catch (err: any) {
-        setError(err.message || "Failed to update queue")
-        return false
-      }
-    },
-    [connection, loadQueues]
-  )
-
-  const createQueue = useCallback(
-    async (queueName: string, properties?: Partial<QueueProperties>): Promise<boolean> => {
-      if (!connection) return false
-      try {
-        await apiClient.createQueue(connection, queueName, properties)
-        await loadQueues()
-        return true
-      } catch (err: any) {
-        setError(err.message || "Failed to create queue")
-        return false
-      }
-    },
-    [connection, loadQueues]
-  )
-
-  const deleteQueue = useCallback(
-    async (queueName: string): Promise<boolean> => {
-      if (!connection) return false
-      try {
-        await apiClient.deleteQueue(connection, queueName)
-        await loadQueues()
-        return true
-      } catch (err: any) {
-        setError(err.message || "Failed to delete queue")
-        return false
-      }
-    },
-    [connection, loadQueues]
-  )
-
   const refreshQueue = useCallback(
     async (queueName: string): Promise<boolean> => {
       if (!connection) return false
@@ -202,6 +157,68 @@ export function useQueues(connectionOverride?: ServiceBusConnection | null) {
         return true
       } catch (err: any) {
         setError(err.message || "Failed to refresh queue")
+        return false
+      }
+    },
+    [connection]
+  )
+
+  const updateQueue = useCallback(
+    async (queueName: string, properties: Partial<QueueProperties>): Promise<boolean> => {
+      if (!connection) {
+        setError("No connection available")
+        return false
+      }
+      setError(null) // Clear previous errors
+      try {
+        await apiClient.updateQueue(connection, queueName, properties)
+        // Only refresh the specific queue, not the entire list
+        await refreshQueue(queueName)
+        setError(null) // Clear error on success
+        return true
+      } catch (err: any) {
+        const errorMessage = err.message || "Failed to update queue"
+        setError(errorMessage)
+        console.error("updateQueue error:", errorMessage, err)
+        return false
+      }
+    },
+    [connection, refreshQueue]
+  )
+
+  const createQueue = useCallback(
+    async (queueName: string, properties?: Partial<QueueProperties>): Promise<boolean> => {
+      if (!connection) {
+        setError("No connection available")
+        return false
+      }
+      setError(null) // Clear previous errors
+      try {
+        await apiClient.createQueue(connection, queueName, properties)
+        // Only refresh the newly created queue, not the entire list
+        await refreshQueue(queueName)
+        setError(null) // Clear error on success
+        return true
+      } catch (err: any) {
+        const errorMessage = err.message || "Failed to create queue"
+        setError(errorMessage)
+        console.error("createQueue error:", errorMessage, err)
+        return false
+      }
+    },
+    [connection, refreshQueue]
+  )
+
+  const deleteQueue = useCallback(
+    async (queueName: string): Promise<boolean> => {
+      if (!connection) return false
+      try {
+        await apiClient.deleteQueue(connection, queueName)
+        // Remove the queue from the list instead of reloading everything
+        setQueues((prev) => prev.filter((q) => q.name !== queueName))
+        return true
+      } catch (err: any) {
+        setError(err.message || "Failed to delete queue")
         return false
       }
     },
